@@ -1,0 +1,1926 @@
+\documentclass[conf]{new-aiaa}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+%\documentclass[journal]{new-aiaa} for journal papers
+\usepackage[utf8]{inputenc}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage[version=4]{mhchem}
+\usepackage{siunitx}
+\usepackage{longtable,tabularx}
+\setlength\LTleft{0pt} 
+\usepackage{xcolor}
+\usepackage{svg}
+\usepackage{float}
+\usepackage{placeins}
+\svgsetup{inkscapepath=fig/}
+\svgpath{{fig/}}  % directory containing figures
+\hypersetup{hidelinks}
+
+\newboolean{commentsOn}
+\setboolean{commentsOn}{true} % or false
+
+\title{The Paradigm Shift in Aircraft System Identification Approaches:\\
+A Review of Classical and Modern Data-Driven Methods}
+
+\author{Kylie S. Sommer-Kohrt\footnote{Graduate Student, School Of Aeronautics and Astronautics, ksommerk@purdue.edu.} and Divyanshi Bansal\footnote{Graduate Student, School Of Aeronautics and Astronautics, bansa171@purdue.edu}}
+\affil{Purdue University, West Lafayette, Indiana, 47907}
+\author{Sabine Brunswicker\footnote{Professor, Polytechnic Institute, sbrunswi@purdue.edu.}}
+\affil{Purdue University, West Lafayette, Indiana, 47907}
+\author{James Goppert\footnote{Research Assistant Professor and Managing Director of Purdue UAS Research and Test Facility, School of Aeronautics and Astronautics, jgoppert@purdue.edu.}}
+\affil{Purdue University, West Lafayette, Indiana, 47907}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This paper presents a comprehensive review of aircraft system identification (SysID) methodologies spanning classical parametric methods and modern non-parametric, data-driven approaches. The practical motivation is the annual Purdue UAS Research and Test Facility (PURT) Pylon Racing Competition and associated indoor fixed-wing testbed \citep{sribunma2026indoor}, where small off-the-shelf fixed-wing aircraft require controller-ready models from limited experimental data. In this setting, motion capture may be the only reliable ground-truth measurement source; pitot-static data, onboard inertial measurements, and direct aerodynamic state measurements are not assumed. A comparative analysis is performed using a nonlinear longitudinal aircraft dynamics model with nominal-plus-unmodeled aerodynamic terms. The benchmark evaluates selected SysID techniques under both idealized state measurements and a motion-capture setting in which inertial position and pitch attitude are observed at 100 Hz while airspeed, angle of attack, flight-path angle, and pitch rate are latent or numerically reconstructed. Additional observation-rate studies at 10 Hz and 2 Hz illustrate how practical observability and derivative quality degrade as sampling bandwidth is reduced. The study highlights the strengths and limitations of each method, offering insight into their suitability for contemporary flight-dynamics modeling, control synthesis, autonomous aircraft applications, and counter-UAS test and evaluation.
+\end{abstract}
+
+\section*{Nomenclature}
+
+\begin{longtable*}{@{}l @{\quad=\quad} l@{}}
+$N$ & number of discrete samples \\
+$n_x, n_u, n_y$ & dimensions of state, input, and output vectors \\
+$i$ & discrete-time index ($i = 1, \ldots, N$) \\[3pt]
+$\mathbf{x}(t) \in \mathbb{R}^{n_x}$ & continuous-time state vector \\
+$\mathbf{u}(t) \in \mathbb{R}^{n_u}$ & continuous-time control input \\
+$\mathbf{y}(t) \in \mathbb{R}^{n_y}$ & continuous-time measured output \\
+% $\boldsymbol{\theta}$ & vector of unknown model parameters \\
+$p_x,p_z$ & inertial longitudinal and vertical position measured by motion capture \\
+$V$ & true airspeed (wind axis) \\
+$\alpha$ & angle of attack\\
+$\gamma$ & flight–path angle \\
+$Q$ & body pitch rate about $y$–axis \\
+$\theta$ & pitch attitude \\
+${\theta_p}$ & vector of constant model parameters \\
+$T$ & thrust along $b_x$ \\
+$\delta_e$ & elevator deflection \\
+$L, D, M$ & lift, drag, and pitching moment \\
+$m, J_y$ & mass and pitch moment of inertia \\
+$\rho, S$ & air density and reference area \\
+$g$ & gravitational acceleration \\
+\end{longtable*}
+
+\section{Introduction:} 
+
+
+System identification is a well-established field that originated in the 1950s. It has remained an enduring subject of research due to its widespread interdisciplinary significance. Fields such as economics, biology, chemistry, physics, and engineering utilize system identification extensively as a data-driven method to create models. Particularly, the field of control theory relies heavily on system identification for model-based approaches such as model predictive control (MPC), $H_{\infty}$ control, and linear quadratic regulators. This reliance has led to major research developments in these fields closely mirroring one another, with advancements in one often enabling advancements in the other. Therefore, in this review, system identification methods will be categorized and discussed alongside relevant control-theoretic developments of each era, reflecting the interwoven nature of research progress in system identification and control theory. 
+
+As in control design, the appropriate system-identification method depends on
+the intended use of the resulting model. If stability margins and frequency
+response are the primary goals, frequency-domain methods are attractive because
+they produce transfer functions whose gain, phase, and robustness properties can
+be evaluated directly using Bode and Nyquist tools. If the goal is to recover
+meaningful aerodynamic or structural parameters, fixed-form time-domain methods
+such as equation-error, output-error, prediction-error, and filter-error
+estimators are often preferred because their parameters map directly to assumed
+force, moment, or state-space structures. When the goal is to capture nonlinear
+or off-nominal behavior that cannot be represented accurately by a fixed model
+structure, data-driven time-domain methods become attractive because they can
+learn part or all of the functional form from data. Methods such as neural
+networks, physics-informed neural networks (PINNs), and Sparse Identification
+of Nonlinear Dynamics (SINDy) trade some of the guarantees and interpretability
+of fixed-form models for flexibility in representing missing or modified
+dynamics.
+
+In the remainder of this section we will discuss the development of system identification categorized by modeling role. Frequency-domain methods identify spectral input-output structure and connect naturally to frequency-based control. Fixed-form time-domain methods estimate interpretable parameters within a prescribed state-space or aerodynamic model. Surrogate methods replace an expensive or unknown map, such as an aerodynamic coefficient table, CFD solver, or full input-output dynamics, with a cheaper learned approximation. Finally, hybrid grey-box methods combine these viewpoints by retaining trusted physics while learning residual or closure terms from data.
+
+The central argument of this review is that modern aircraft system
+identification is not replacing classical parametric methods with unconstrained
+black-box learning. Instead, the field is moving toward structured flexibility:
+models retain trusted kinematics, rigid-body balance laws, uncertainty
+quantification, and interpretable parameters where possible, while learning
+only the closures, residuals, or hidden input transformations that are not
+captured by the nominal model.
+
+Finally, we consider a case study motivated by the annual PURT Pylon Racing Competition at Purdue and the indoor fixed-wing UAS verification and validation testbed described by \citet{sribunma2026indoor}. In this environment, small off-the-shelf fixed-wing aircraft fly repeated laps and must be modeled rapidly from limited motion-capture data before being used with modern model-based controllers such as MPC. Unlike traditional flight-test aircraft, these platforms may not carry calibrated pitot-static systems, high-quality onboard IMUs, or air-data vanes. The empirical comparison is therefore centered on methods that can operate when the only trusted ground-truth signal is external position and attitude. The methods considered include the classical aerospace system-identification workflow represented by SIDPAC-style tools, frequency-domain spectral identification, SINDy, PINN-style grey-box learning, Universal Differential Equation (UDE) residual modeling, and neural coefficient surrogates. In this paper, ``SIDPAC-style'' does not mean only OEM. It refers to the broader fixed-structure aircraft identification workflow: equation-error fits for initialization and model-structure screening, output-error maximum-likelihood estimation for deterministic dynamics, filter-error or innovation methods for process-noise settings, and Fisher-information uncertainty diagnostics \citep{KleinMorelli2006,Morelli2002SIDPAC}. The implemented frequency-domain baseline uses Welch/ETFE-inspired spectral estimates, coherence screening, and weighted complex least-squares fitting. These ingredients are related to the workflow used in comprehensive tools such as CIFER \citep{Tischler1995SystemIM}, but the implementation here is not CIFER and its performance should not be interpreted as CIFER performance. Variational system identification extends the prediction-error family to process-noise and measurement-noise settings by estimating a smoothing distribution over latent states as well as model parameters \citep{dutra_variational_2025}. SINDy uses a physically motivated candidate library and sparsity constraints to discover compact nonlinear terms. Neural networks are treated as a surrogate modeling technology whose role depends on what map they replace: the full dynamics, an aerodynamic coefficient closure, a CFD-derived flow map, a residual correction, or an unobserved input-transformation map. PINN-style approaches introduce differential-equation residuals into the loss, but for the present aircraft problem the residual should enforce only the tractable flight-dynamics structure rather than an incomplete aerodynamic model. UDEs provide a closely related but more direct formulation in which known rigid-body dynamics are retained and neural correction terms represent unmodeled aerodynamic forces, moments, or hidden control effects. The benchmark is intentionally run under multiple observation assumptions: an ideal state-output case using simulated noisy $V,\alpha,\gamma,q$ for algorithm diagnosis, a motion-capture-derived state case, and a motion-capture-output case in which $V,\alpha,\gamma,q$ remain latent and the measured outputs are position and pitch attitude. This distinction is important because the benchmark is intended to test behavior under both structural model error and realistic measurement limitations. The same measurement-limited identification problem also arises in counter-UAS testing, where external tracking may be available but cooperative onboard air-data and inertial measurements may not be.
+
+The contributions of the revised manuscript are therefore fourfold. First, it
+organizes aircraft system-identification methods by modeling role rather than
+only by chronology. Second, it defines a reproducible 3-DoF longitudinal
+benchmark with known nonlinear aerodynamic residuals, direct-state and
+motion-capture-style measurement channels, and SAFE-off/SAFE-on hidden-input
+cases. Third, it implements a shared comparison suite spanning fixed-structure
+time-domain methods, spectral methods, sparse symbolic methods, neural
+surrogates, PINN-style closures, UDE residuals, hidden-input learners, and
+latent-state mocap-output estimators. Fourth, it reports validation accuracy,
+runtime, and diagnostic figures so that method recommendations can be tied to
+the measurement and model-mismatch regime rather than to a single aggregate
+ranking.
+
+\subsection{Frequency-Domain Methods: Spectral Structure (1958-1995)}
+Frequency-domain system-identification methods grew naturally from classical
+frequency-based control. Nyquist's stability criterion \citep{nyquist1932regeneration}
+and Bode's gain-phase design framework \citep{bode1940relations} made the
+frequency response a central object for control analysis long before modern
+digital identification was practical. Early flight-control practice often used
+sine-dwell or swept-sine tests to construct empirical Bode and Nyquist plots,
+then adjusted gains to achieve acceptable stability margins. Later advances in
+spectral estimation, fast Fourier transforms, and state-space realization
+allowed frequency-domain data to be used for formal nonparametric and
+parametric identification. In aircraft and rotorcraft practice, this family of
+methods remains important because it connects directly to bandwidth, phase
+delay, coherence, actuator limits, and control-law validation.
+
+\subsubsection{Frequency-based Non-parametric Methods}
+The Blackman--Tukey method \citep{blackman1958measurement} was an important
+early nonparametric spectral estimator because it estimated spectra indirectly
+from windowed autocorrelation functions, reducing the computational burden of
+working with long time records. The fast Fourier transform
+\citep{cooley1965algorithm} then made direct spectral estimation practical.
+Welch's method \citep{welch1967use} improved robustness by dividing a record
+into overlapping, windowed segments, computing periodograms for each segment,
+and averaging the resulting spectra. For input-output identification, analogous
+auto- and cross-spectral estimates provide empirical transfer-function
+estimates and coherence diagnostics \citep{ljung1985asymptotic}. The coherence
+is especially important in flight testing: low coherence indicates that a
+frequency-response point may be dominated by noise, nonlinearities, feedback
+correlation, or insufficient excitation.
+
+
+
+\subsection{Frequency-based Parametric Models}
+
+Frequency-domain aircraft identification is valuable when the goal is a compact
+linear model for handling-quality, stability-margin, or flight-control analysis.
+After a nonparametric frequency-response estimate has been obtained, a
+parametric model can be fitted by minimizing complex residuals between measured
+and modeled transfer functions. Iterative least-squares approaches such as the
+Sanathanan--Koerner method, later developments by Pintelon and Schoukens, and
+state-space frequency-domain methods such as those of McKelvey provide ways to
+estimate rational transfer functions or state-space models from frequency-domain
+data while accounting for noise and weighting across frequency. In aerospace
+practice, dedicated excitation and coherence diagnostics are as important as
+the fitting algorithm. Multisines, chirps, 3-2-1-1 maneuvers, and sine sweeps
+are used to separate input channels and excite the relevant bandwidth, while
+coherence is used to judge whether an estimated frequency-response point is
+trustworthy. CIFER-style workflows \citep{Tischler1995SystemIM} are the
+best-known aircraft and rotorcraft example of this philosophy: they combine
+careful excitation design, spectral estimation, coherence screening, transfer
+function fitting, and control-oriented validation. The implementation used in
+the benchmark later in this paper is deliberately more modest. It uses
+Welch/ETFE-inspired averaged spectra and a coherence-weighted continuous-time
+linear fit, so it should be interpreted as a compact spectral baseline rather
+than as a replacement for CIFER.
+
+
+\subsection{ Time Domain Parametric Methods: Enforced Prespecified Structure (1960-1992)}
+This section concentrates on system identification paradigms developed since the 1960s. Where pertinent, foundational concepts and intellectual predecessors from earlier periods are introduced to establish the necessary historical and theoretical context. The development of time-domain system identification surged after the paradigm shift caused by the introduction of state-space methods and innovation sequences in \cite{kalman1960new}. Kalman expanded optimal linear estimator frameworks that had previously been used on stationary stochastic processes in the frequency \cite{wiener1964extrapolation} and discrete time domain \cite{kolmogorov1941interpolation} to time-varying processes expressed in the discrete and continuous time domain.  The introduction of state space methods allowed for the control and modeling of Multi-Input Multi-Output (MIMO) systems, provided an explicit model structure for process and measurement noise, and provided a universal time-based model to represent system dynamics with. All of these developments allowed for more complex systems to be modeled and controlled, increasing the need for improved methods of system identification. The introduction of the Kalman filter also laid the theoretical groundwork for later system identification methodologies through the introduction of an innovation filter. 
+
+\subsubsection{Equation/Output/Prediction/Filter Error Methods}
+The expansion of dynamic systems and most importantly the introduction of the innovation filter gave rise to the development of prediction error methods in 1965 \cite{aastrom1965numerical}. This system identification methodology uses the innovation filter introduced in \cite{kalman1960new} as a form of prediction error so maximum likelihood estimator principles  can be applied to find the asymptotically efficient solution using the statistical framework introduced by \cite{fisher1922mathematical}. 
+This was accomplished by proving that the parameters that maximize the likelihood of producing the current output given the previous inputs and outputs are equivalent to those found by minimizing the sum of least squares error when the unmodeled disturbance terms can be simplified to Gaussian white independent identically distributed noise. In effect this means that all of the correlated portions of the noise can be accounted for using the identified parameters. 
+
+This proof unified the existing equation error system identification method with more complex methods. Equation-error estimation in modern aircraft SysID traces back to ordinary least squares, whose mathematical roots include Legendre's early nineteenth-century work on orbital parameter estimation \cite{legendre1805new} and later time-series regression work such as Yule's autoregressive modeling \cite{yule1924}. In the aircraft setting, equation error solves for parameters by minimizing residuals in algebraic or differential equations built from measured states, inputs, and state derivatives. The primary shortcoming of this method is that it is unable to model or account for measurement noise because the measurement is used to establish both the ground truth and the predicted truth inherently correlating the dependent variable and the regressor making the least squares approach no longer valid in this case. When the equation error method is used on a system with measurement noise it discovers biased parameter estimates. This problem is amplified when position and attitude measurements are differentiated to obtain velocity, angle of attack, flight-path angle, and pitch rate. This problem is solved by the prediction error method which accounts for both measurement and process noise as long as they meet the aforementioned noise conditions. A result of this is the output error method which identifies parameters for models with only measurement noise and no process noise. In aerospace, SIDPAC is closely associated with time-domain aircraft parameter estimation and output-error workflows \citep{Morelli2002SIDPAC}, while CIFER is more closely associated with frequency-domain rotorcraft and aircraft identification \citep{Tischler1995SystemIM}. The final major system identification method within the prediction error method framework is the filter error method. This method accounts for both process and measurement noise and uses the Kalman filter as the innovation filter for a state space system. FEM minimizes the error between the actual measured output and the one-step-ahead predicted output from a Kalman filter or similar state estimator. It explicitly estimates the system parameters alongside the noise covariance matrices, process noise and measurement noise. More recently, variational system identification has been proposed as an alternative formulation of the same maximum-likelihood problem, replacing the filter recursion with an optimization over a smoothing distribution for the latent state trajectory \citep{dutra_variational_2025}. Additional important work rigorously defining what system identification methods qualify as prediction error methods and proving the asymptotic efficiency and consistency of the method mathematically for the new more general framework was continued by Lennart Ljung in the 1970s \cite{1101840}. 
+
+\subsubsection{Refined Instrumental Variables}
+The next system identification method requires a step backwards to the equation error method. Prior to the discovery of the prediction error method another statistical approach was used to reduce the bias caused by measurement noise when solving for the system parameters using the ordinary least squares method. This approach is called the instrumental variables method. It was first proposed by economist Philip Wright as applied to a static economics problem in 1928 \cite{wright1928tariff} and a time series by statistician Olav Reiersol in 1945\cite{reiersol1945confluence}.
+The core idea is to replace the noisy regressors with auxiliary variables, called "instruments", which are strongly correlated with the regressors but statistically independent of the measurement noise affecting the output. In the context of system identification this was typically done using past inputs of the system. The major downside to this method is that while it eliminates most bias it does not utilize all information available in the data to create the most statistically efficient estimator. Prediction error methods approach maximum asymptotic efficiency as defined by the Cramer Rao lower bound while traditional instrumental variable methods were substantially less efficient in the statistical sense but far more computationally efficient than prediction error methods which required iterative nonlinear optimization to solve in most cases. This level of computational burden was unsolvable for most computers of the time period meaning many people still used instrumental variables simply out of necessity since it had a closed form linear solution.
+
+In order to lessen the statistical efficiency gap between instrumental variables method and prediction error methods a new approach called refined instrumental variables was proposed in 1970 \cite{young1970instrumental}. This method traded off some of the abundant computational efficiency for statistical efficiency. Rather than using past input measurements as "instruments" a new iterative recursive method is used to find "instruments" that better reduces error variation and that account for an iterative estimated noise model as well making the parameter estimate more efficient. Many of these improvements were inspired by the improvements made by \cite{aastrom1965numerical} but reformatted using auxiliary variables to make implementing them less burdensome. It is still not efficient as prediction error methods but it is very close in terms of statistical efficiency it is also much less of a computational burden since it does not require nonlinear optimization. 
+
+\subsubsection{Subspace Methods}
+The next major discovery relevant to system identification following the discovery of prediction error methods was made by Ho \& Kalman in 1966, it is typically called the Ho-Kalman Realization \cite{HOKALMAN+1966+545+548}. This realization used findings from \cite{kalman1960new} especially those regarding controllability and observability to discover the minimum state space needed to represent a system by using singular value decomposition of a Hankel matrix of impulse responses. The number of nonzero singular values discovered is equal to the rank of the infinite Hankel matrix and represent the minimum state dimension of the system. While this discovery did not directly result in a new method of system identification it was foundational in the eventual development of subspace system identification method 26 years later.
+
+The final classical system identification method introduced is the subspace method. This method came along substantially later than the other system identification methods \cite{aastrom1965numerical,young1970instrumental} and the Ho-Kalman realization \cite{HOKALMAN+1966+545+548} mostly because most of the research interest in the intermediate decade was on theoretical work primarily with regards to prediction error methods due to their optimality and ability to handle stochastic systems. During this period foundational theoretical findings were made regarding terminology, problem formulation, and broad classifications of system identification methods \cite{ASTROM1971123}.  
+
+The Ho-Kalman realization is a framework that was originally developed for a deterministic setting and mathematics using large Hankel matrices were very burdensome so they became much more practical to implement in the 1990s when the publicly available computing resources vastly improved. There are two primary subspace methods that were developed in this time frame: Multi-variable Output-Error State sPace (MOESP) \cite{verhaegen1992subspace} and Numerical algorithms for Subspace State Space System IDentification (N4SID) \cite{VANOVERSCHEE199475}. These methods differ in how they calculate the state sequence and the exact geometric methods used to separate the identifiable dynamics from the noise. Despite these differences they produce equivalent results as they take separate valid approaches to solving the same problem. This approach has a simple unique closed form solution and was created to provide a simple optimal method for performing system identification on a MIMO state space system that is faster than prediction error methods in this case and more robust to local minima.
+
+\subsection{Time Domain Data-Driven Methods: Learned Structure (1990s-Present)}
+One issue with classical approaches is that they require the systems being modeled to fit a clear, known, typically linear form. There are many systems that behave nonlinearly and unexpectedly that also need to be identified. In recent years more emphasis has been placed on data-driven methods to allow for the discovery of models with unexpected and complex forms that could not be well modeled using classical methods. Originally these data-driven approaches were non-parametric black boxes making robust safety guarantees impossible. However, recently particular emphasis has been placed on the field of symbolic regression due to its ability to produce parsimonious physical models that are easy to interpret the physical meaning of. The timeline of development for both of these data-driven approaches will be discussed to show the development towards more interpretable data-driven approaches as these approaches bridge the gap between the interpretability of classical methods and the modeling flexibility of black-box data driven approaches. 
+
+\subsubsection{Neural Networks}
+Neural networks have been around since as early as the 1940s but did not gain widespread popularity until a paper written in 1986 \cite{rumelhart1986learning} popularized the knowledge that backpropagation could be used to train multilayer perceptrons to discover underling data trends. While this was the paper that popularized the idea of this training method an earlier paper made the initial discovery in 1974 \cite{werbos1974beyond}. The first application of neural networks to identify the model for an unknown nonlinear dynamic system occurred in 1990 \cite{kumpati1990identification}  where this model was additionally used to apply adaptive control onto the system successfully. This crucial discovery led to a surge of interest into black box modeling approaches because it allowed for the discovery of complex and nonlinear models with no requirement of prior knowledge of the system. While this was beneficial for many applications where discovering a physical model is infeasible it ran into issues in being applied to real-world controls scenarios due to the difficulty in proving robust safety since the weight and bias structure of neural networks have no physical meaning making debugging during training difficult and the options for designing a controller for the fully trained model limited. Efforts to use neural networks as a more interpretable system identification method gave rise to Physics Informed Neural Networks (PINNs). PINNs introduce physics based constraints onto neural networks through the introduction of physics-based loss term. This helps neural networks handle noise better and allows for the discovery of parameters in addition to the discovery of a nonparametric model providing more flexibility for controller design. PINNs were introduced conceptually in 1998 \cite{lagaris1998artificial} and formally named and popularized in a publication made in 2017 \cite{raissi2017physics}. Overall this concept bridges the gap between classical system identification concepts and modern nonparametric approaches by enforcing physical constraints through the loss function allowing for a wider usage of neural network based system identification techniques.
+
+\subsubsection{Genetic Symbolic Regression}
+While the genetic algorithm has existed as a global optimization framework since 1975 \cite{holand1975adaptation} the idea to use this global optimization framework as a method of equation discovery was a much more recent research development made in 1990 \cite{koza1990genetic} by Holland's student John Koza. The genetic algorithm is a global optimization heuristic developed based off of the principle of natural selection. It starts by randomly  generating a population, giving that population fitness score, and only allowing organisms with high enough fitness scores to reproduce. Reproduction involves crossover which involves mixing the the genetic material of two parent organisms and mutation which involves making a small change to the the resulting organism to promote diversity.Then the under-performing members of the population are replaced by the new organisms and the previous steps are repeated until the algorithm reaches the global optimum or reaches an iteration limit. The work \cite{koza1990genetic} applied this algorithm to equation discovery by making the organisms equation trees where the leaves are coefficients, the branches are mathematical operators, and these operators connect at the root to form the equation. Then the genetic algorithm was applied to these equation trees until they converged to a globally optimal solution. One issue with applying the genetic algorithm directly to the equation discovery problem as defined was that reproducing using entire equation trees is that often correctly discovered operations would get lost, equation trees would grow unnecessarily large and complex, and the process of reproducing was often redundant and not computationally efficient. These issues made using the genetic algorithm not a particularly popular approach until automatically defined functions were introduced \cite{koza1994genetic} addressing the issues with the original approach, improving scalability considerably, and popularizing the approach among the research community. Automatically defined functions replace clusters of branches and represent more complex mathematical operations. By grouping mathematical operations it allows for correctly identified portions of the equation to be passed on more readily and more efficient reproduction which lead to more parsimonious solution discovery. While the advancements made in \cite{koza1994genetic} made this symbolic regression method usable there is still room for improvement. This approach still tends to result in unnecessarily bloated solutions, struggles to handle coefficient leaves in an efficient manner, and premature convergence. Despite the many limitations this work is foundational to the field of symbolic regression and system identification because it was the first method capable of automated complex model discovery. The previously mentioned drawbacks of the genetic symbolic regression have improved due to ongoing research into optimizing genetic symbolic regression.
+
+
+\subsubsection{Sparse Identification of Nonlinear Dynamics}
+ The seminal work discussing this approach is Discovering governing equations from data:Sparse identification of nonlinear dynamical systems by \cite{brunton2016discovering}. This approach is highly efficient and interpretable since it prioritizes parsimony in its search for coefficients; however, there are still notable drawbacks to this approach. The most obvious is the reliance upon expert knowledge to generate the dictionary of possible terms. Another issue is the need for dense timeseries data. Work by \cite{champion2019data} has shown that even a short duration of densely collected data is better able to model unknown dynamics than a longer duration of sparse data. This approach also struggles when the measurements taken do not represent all states relevant to representing the system dynamics. This is because the dictionary of possible terms will not include the terms needed to represent this "hidden" state. Additionally, this approach does not scale well for high dimensional problems due because the library quickly becomes intractably large. Despite the seemingly large list of cons there have been papers offering solutions to each of the problems discussed making this a promising symbolic regression approach.
+\subsubsection{Hybrid Neural Differential Equation Methods}
+Recently, a growing body of work has sought to augment known equations of motion 
+with a learned neural residual term. This approach expresses system dynamics as
+\begin{equation}
+    \dot{x}(t) = \underbrace{f_{\text{phys}}(x, u;\,\theta_p)}_{\text{known physics}} 
+    \;+\; \underbrace{\mathcal{U}_{\phi}(x, u)}_{\text{learned residual}},
+    \label{eq:ude}
+\end{equation}
+where $f_{\text{phys}}$ encodes the known aerodynamic equations of motion and 
+$\mathcal{U}_{\phi}$ is a neural network trained to absorb unmodeled effects such 
+as icing, gusts, or actuator nonlinearities. While Rackauckas~\textit{et al.}~\cite{rackauckas2020universal} 
+formalized this structure as Universal Differential Equations (UDEs) within the 
+broader scientific machine learning community, its adoption in aerospace system 
+identification remains nascent.
+
+Current applications of this philosophy, often termed Physics-Informed Neural ODEs, 
+demonstrate significant potential. \citet{liPINODE2023} applied this form to a 
+fixed-wing aircraft under icing and actuator faults, splitting universally applicable 
+kinematics from a neural network correction on the kinetics, similar to the 
+decomposition expressed in Eq.~\eqref{eq:ude}. \citet{jarry2025nodefdm} extended 
+this philosophy to trajectory-level modelling, embedding Neural ODEs within 
+analytical kinematic relations (NODE-FDM) to outperform physics-only baselines 
+such as BADA on altitude, speed, and mass dynamics.
+
+Despite these gains, widespread implementation continues to be constrained by 
+flight-certification requirements for fully interpretable models and the scarcity 
+of high-fidelity, labeled off-nominal flight data needed to train the residual 
+terms $\mathcal{U}_{\phi}$ reliably. 
+\subsubsection{Physics Informed Neural Networks}
+Recent aerospace-focused work by Michek, Mehta, and Huebsch~\citep{michek2026flight} provides a useful reference point for interpreting PINNs in flight-dynamics modeling. They distinguish between Determinant PINNs, which use a trajectory network and a parameter-estimation layer with a user-specified functional form; Non-Determinant PINNs, which replace the parameter layer with a neural network that learns how aerodynamic coefficients vary with explanatory variables; and Modified Non-Determinant PINNs, which remove the trajectory network when sufficient measured or derived state-rate information is available and train the coefficient network through the equations-of-motion residual. Their simulated demonstrations include both a 2D projectile case with varying drag and a nonlinear F-16 6-DOF case in which aerodynamic coefficients are learned from many flight intervals with randomized sinusoidal and doublet control inputs.
+
+This framing is important for the present 3-DOF longitudinal benchmark. The goal is not to use a PINN as a high-fidelity CFD surrogate or to enforce the nominal aerodynamic model as if it were exact. Instead, the PINN-style model considered here is closer to the Non-Determinant or Modified Non-Determinant coefficient-learning viewpoint: the rigid-body longitudinal equations provide the physics residual, while the aerodynamic closure terms $C_L$, $C_D$, and $C_M$ are allowed to contain learned nonlinear corrections. The simplified 3-DOF setting therefore acts as a controlled intermediate case between classical parameter estimation and the more general multi-flight 6-DOF coefficient-learning problem studied by Michek et al.
+\subsection{Bayesian Approaches and Uncertainty Quantification}
+Classical output-error methods provide point estimates of aerodynamic parameters with
+uncertainty quantified via the Cram\'{e}r--Rao lower bound (CRLB)\citep{hale2016aerodynamic} obtained from the inverse of the Fisher information matrix. However, the CRLB is inherently a frequentist and asymptotic result, relying on sufficient excitation, correct model structure, and local Gaussianity of the likelihood. These limitations motivate Bayesian approaches, where Maximum A Posteriori (MAP) estimation paired with the Laplace approximation provides a local Gaussian approximation of the posterior distribution around the the most probable parameter estimates(MAP). While computationally efficient, the Laplace approximation implicitly assumes near-Gaussian posteriors and can degrade under strong nonlinearities, limited excitation, or sparse flight-test data, where posterior distributions may become skewed or multimodal.
+
+When posterior distributions deviate from Gaussianity, Markov chain Monte Carlo (MCMC) methods enable recovery of the full posterior. Early work by Ninness and Henriksen \citep{ninness2010bayesian} demonstrated Metropolis--Hastings (MH) sampling for nonlinear dynamic-system identification, highlighting its advantage in small-sample regimes where asymptotic approximations fail. Hendriks et al.\ \citep{hendriks2021practical} subsequently show that Hamiltonian Monte Carlo substantially reduces chain autocorrelation in higher-dimensional models, making MCMC more tractable for complex identification problems. In aerospace applications, MCMC has seen growing adoption for aerodynamic coefficient
+estimation from flight and ballistic-range data \citep{oz2025nonlinear,
+kassem2025bayesian, natureSR2026, callisto2024jsrocket}. Despite these advances, the computational cost of MCMC remains prohibitive for large flight envelopes and long trajectory datasets.
+
+
+This computational bottleneck has motivated the adoption of variational inference (VI), which reformulates posterior estimation as an optimisation problem. Dutra \citep{dutra_variational_2025} applies VI directly to aircraft system identification by jointly estimating aerodynamic parameters and a smoothing posterior over the latent state path through ELBO maximisation. The method is positioned as a practical alternative to the filter-error method for systems with both process noise and measurement noise, such as aircraft operating in turbulence, because it avoids Riccati-equation propagation and unstable predictor issues associated with some FEM implementations. Dutra demonstrates the approach on real aircraft flight-test data and reports convergence from zero initial parameter guesses across the tested examples, while emphasizing that smoother output alone is not a sufficient validation metric because smoothing corrections can hide model error. In the present benchmark, variational system identification therefore fits between OEM and modern learned-residual methods: it is a probabilistic grey-box estimator for latent-state and parameter uncertainty, but it does not by itself discover missing aerodynamic terms unless those terms are included in the model parameterization. Extending this to nonparametric dynamics, variational GP-SSMs \citep{frigola2014variational} enable scalable inference over unknown transition functions, while amortised formulations \citep{doerr2018probabilistic} further reduce cost via recognition networks. Park et al.\ \citep{park2021bayesian} apply this to aircraft-specific settings with a multi-regime GP-SSM that clusters flight regimes via a mutual-information regulariser. VI-based methods, however, depend critically on the expressiveness of the variational family and can underestimate uncertainty in multimodal or highly nonlinear regimes such as stall or actuator saturation.
+
+An alternative perspective treats aerodynamic coefficients as unknown functions of the flight condition rather than fixed parameters. Gaussian process (GP) regression provides a principled Bayesian framework for such nonparametric modelling, offering calibrated uncertainty that adapts to data density \citep{rasmussen2006gaussian}. In aircraft applications, GP-based methods have been used to learn stability and control derivatives directly from flight data \citep{hemakumara2013learning}, including extensions to noisy input settings via NIGP \citep{karino2020nigp}. 
+Despite their strong uncertainty quantification capabilities, these nonparametric approaches generally lack direct physical interpretability in terms of classical stability and control derivatives. This remains a critical limitation for certification and control design, where interpretable, low-dimensional parametric models are still required.  Another line of work adopts a grey-box Bayesian perspective, such as Mazhar et al.\citep{mazhar2024bayesian} demonstrated
+improved fit for aircraft lateral-directional dynamics via a Bayesian-refined Box--Jenkins structure.  In summary, Bayesian approaches are undergoing a significant evolution, moving away from restrictive asymptotic assumptions toward flexible, data-driven architectures and are being actively researched by the community.
+\subsection{Surrogate Modeling and Aerodynamic Closure Learning}
+Surrogate modeling is best understood as a modeling role rather than a single algorithm. A surrogate replaces an expensive, unavailable, or inconvenient map with a cheaper approximation. In aircraft applications, the replaced map may be a CFD solver, a wind-tunnel aerodynamic database, a lookup table of force and moment coefficients, a reduced-order flow model, or the complete input-output dynamics. Classical surrogate methods include response surfaces, radial basis functions, splines, Kriging, and Gaussian-process emulators. The design and analysis of computer experiments formalized Kriging-style emulation for expensive deterministic simulations \citep{sacks1989design}, while GP regression provides the probabilistic foundation for uncertainty-aware surrogates \citep{rasmussen2006gaussian}. In aerospace design, surrogate-based analysis and optimization became important because high-fidelity aerodynamic and multidisciplinary simulations are too expensive to evaluate repeatedly across a large design space \citep{queipo2005surrogate,forrester2008engineering}.
+
+Multi-fidelity surrogate modeling extends this idea by combining data sources with different cost and accuracy. A low-fidelity panel method, reduced CFD grid, or empirical aerodynamic model may be inexpensive but biased, while wind-tunnel, high-fidelity CFD, or flight-test data are more accurate but sparse. Bayesian multi-fidelity models use correlations between fidelity levels to improve predictions from limited high-fidelity data \citep{kennedy2000predicting}. This perspective is especially relevant for aircraft system identification because flight-test data rarely cover the full envelope, while simulation and wind-tunnel databases can provide additional information about the aerodynamic closure. Recent aerodynamic applications combine simulation and wind-tunnel data to correct Reynolds-number effects and pressure distributions using multi-fidelity learning \citep{yang_reynolds_2023}.
+
+Reduced-order modeling is another surrogate route for high-dimensional flow physics. Proper orthogonal decomposition (POD) represents flow fields in a low-dimensional modal basis \citep{berkooz1993pod}, while dynamic mode decomposition (DMD) extracts coherent spatio-temporal modes from simulation or experimental data \citep{schmid2010dmd}. Koopman-operator methods provide a related lifted-linear view of nonlinear dynamics, originating from Koopman's Hilbert-space formulation \citep{koopman1931hamiltonian} and leading to data-driven approximations such as extended dynamic mode decomposition (EDMD) \citep{williams2015data}. These approaches are not usually flight-test parameter-estimation methods by themselves, but they can produce compact flow, surrogate, or lifted state-space models that feed a lower-dimensional flight-dynamics model.
+
+Neural networks fit naturally within this surrogate taxonomy. A feedforward neural network can approximate an aerodynamic coefficient map, a recurrent or neural state-space model can approximate input-output dynamics, and an autoencoder can learn a latent reduced-order representation. More recently, neural operators such as DeepONet and the Fourier Neural Operator learn mappings between function spaces, making them suitable candidates for CFD-level surrogates that map geometry, boundary conditions, and flight condition to flow fields or aerodynamic loads \citep{lu2021deeponet,li2021fno}. In this review, neural networks are therefore not treated as separate from surrogate models. Instead, they are one flexible surrogate class whose interpretability and usefulness depend on whether they replace the full aircraft dynamics, the aerodynamic closure, a residual correction, or a high-fidelity flow solver.
+
+Classical nonlinear input-output identification also deserves explicit mention. NARX/NARMAX models, Volterra-series methods, and block-oriented Hammerstein-Wiener structures model nonlinear dynamics using lagged inputs and outputs rather than rigid-body state equations; see, for example, the NARMAX treatment of \citet{billings2013nonlinear}. These methods are powerful when the desired product is a predictive input-output model, especially for closed-loop control or signal processing. They are less directly aligned with the present aerodynamic benchmark because the paper asks whether each method can separate missing aerodynamic closure, state reconstruction error, and hidden command reshaping. The implemented Hankel/subspace and Koopman-EDMD rows partially represent this input-output and lifted-linear tradition, but a full NARMAX/block-oriented benchmark remains future work.
+\subsection{Model Flexibility vs.\ Interpretability}\label{sec:flex_int}
+Two properties govern the practical utility of any system identification method for aerospace applications: {model flexibility} and model interpretability. Model flexibility refers to the capacity of a model structure to represent a broad range of dynamic behaviors including nonlinear, coupled, or partially unknown phenomena without requiring to fully specify the functional form in advance. A highly flexible model can fit arbitrarily complex input–output relationships given sufficient data, but it does so by expanding the space of candidate representations, in other words by increasing the dimension of parameters in the model structure. On the other hand, model interpretability refers to the degree to which the identified parameters and model structure can be mapped to physically meaningful quantities. An interpretable model allows us to extract aerodynamic derivatives, validate physical plausibility, reason about failure modes, and construct stable controllers.
+These properties are mathematically best captured by the classical bias–variance trade-off. Increasing model complexity reduces bias by enlarging the representable function class, but simultaneously increases estimation variance and degrades generalization to unseen data.
+% As discussed by Pillonetto~\textit{et al.}~\cite{pillonetto_deep_2023}, the expected validation error for a parametric model can be approximated as
+% \begin{align}
+%     \mathbb{E}[V_{\text{valid}}] \approx \sigma^2 \left(1 + \frac{m}{N} \right),
+%     \label{eq:bias_variance}
+% \end{align}
+% where $m$ denotes the number of free parameters and $N$ the number of data samples. This relationship makes the trade-off precise, i.e.,  \\
+
+Consequently, classical identification methods adopt parsimonious, low-dimensional parameterizations and appeal to principles such as Occam's razor to select the simplest model consistent with the data~\cite{ljung1999system}. 
+In the context of aircraft system identification, this trade-off manifests clearly across the spectrum of available methods, illustrated qualitatively in Fig.~\ref{fig:interp_flex_bw}. At one end, classical approaches such as the Output-Error Method (OEM) use compact, physics-based parameterizations in which aerodynamic stability and control derivatives retain direct physical meaning, supporting analysis, certification, and model-based control design. The model structure is fixed a priori from the equations of motion, yielding high interpretability but limited flexibility.
+% The effects such as gust disturbances, actuator nonlinearities, or off-nominal aerodynamic behavior are not encoded in the assumed parameterization and therefore cannot be represented accurately and will instead manifest as biased parameter estimates or inflated residuals.
+
+Moving toward greater flexibility, Sparse Identification of Nonlinear Dynamics (SINDy)~\cite{brunton2016discovering} expands the candidate function space by constructing a user-defined library of basis terms and then applying sparsity promoting regularization to select a compact, active subset. This retains a degree of interpretability because the discovered terms are explicit symbolic functions of the state, while relaxing the requirement for a fully pre-specified model structure.
+
+Surrogate models occupy a parallel axis in this taxonomy because they are defined by the map they replace rather than by a specific estimation objective. A GP, neural network, or reduced-order model may be used as a surrogate for an aerodynamic coefficient table, a residual force model, a CFD solver, or the full aircraft dynamics. Interpretability therefore depends on the surrogate target. A neural network that outputs $C_L$, $C_D$, and $C_M$ is more physically inspectable than one that maps directly from inputs to future states, even if both are neural surrogate models.
+
+Physics-Informed Neural Networks (PINNs)~\cite{raissi2017physics} represent a hybrid use of surrogate modeling and physics regularization, but the meaning of the physics residual must be chosen carefully. For aircraft system identification at the flight-dynamics level, the rigid-body equations and kinematic identities are the reliable physics, while aerodynamic force and moment models are closures that may be incomplete. Penalizing a PINN for deviating from a nominal aerodynamic coefficient model can therefore hurt discovery of unmodeled effects. In this work, PINN-style methods are interpreted more narrowly as grey-box learners that enforce the longitudinal equations of motion while allowing the aerodynamic closures to be learned or regularized.
+
+At the most flexible extreme, Hybrid Neural Differential Equation methods embed neural network terms directly within the known differential equations of motion to represent unmodeled or partially known dynamics. Rather than learning a fully black-box input–output map, a UDE augments the physics with a learned correction term: $\dot{x}(t) = f_{\text{phys}}(x,u;\theta_p) + \mathcal{U}_\phi(x,u)$, where $\mathcal{U}_\phi$ accounts for residual dynamics not captured by $f_{\text{phys}}$. This is particularly natural for aircraft identification because the rigid-body structure can be retained while the neural term learns missing aerodynamic force and moment increments. The cost is reduced interpretability: $\theta_p$ and $f_{\text{phys}}$ remain physically meaningful, but the correction term $\mathcal{U}_\phi$ is not as directly interrogable as a closed-form aerodynamic model. Pure black-box neural networks extend this 
+further, maximizing representational flexibility at the expense of both interpretability 
+and the safety-critical certifiability required in aerospace applications.\\
+
+From this perspective, classical identification methods, surrogate models, and hybrid grey-box approaches are best understood not as competing paradigms but as adopting different strategies to manage the bias variance trade-off summarized in Fig.~\ref{fig:interp_flex_bw}. The methods selected for comparison in this work are OEM, SINDy, PINN-style grey-box learning, and UDE residual modeling because they span this spectrum and allow for a principled assessment of how this trade-off affects parameter recovery, residual modeling, generalization, and practical utility for aircraft dynamics identification.
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.62\linewidth,
+    height=0.47\linewidth,
+    xmin=0, xmax=10.4,
+    ymin=0, ymax=10.4,
+    xlabel={Flexibility},
+    ylabel={Interpretability},
+    xtick={0,5,10},
+    xticklabels={Low,Moderate,High},
+    ytick={0,5,10},
+    yticklabels={Low,Moderate,High},
+    grid=both,
+    axis lines=left,
+    major grid style={dashed, gray!25},
+    minor tick num=0,
+    tick align=outside,
+    axis line style={black, thick},
+    xlabel style={font=\small},
+    ylabel style={font=\small},
+    tick label style={font=\small},
+    label style={font=\small},
+    enlargelimits=false,
+    clip=false
+]
+    % OEM: high prior knowledge (circle)
+    \addplot[
+        only marks,
+        mark=*,
+        mark size=3pt,
+        black,
+        thick
+    ] coordinates {(2.0,9.0)};
+    % SINDy: moderate prior knowledge (square)
+    \addplot[
+        only marks,
+        mark=square*,
+        mark size=2.8pt,
+        black
+    ] coordinates {(5.0,7.5)};
+    % PINNs: high prior knowledge (circle) — raised above UDEs
+    % Enforces full governing equations; identified params are physically meaningful
+    \addplot[
+        only marks,
+        mark=*,
+        mark size=3pt,
+        black,
+        thick
+    ] coordinates {(7.5,6.5)};
+    % UDE: moderate prior knowledge (square) — lowered below PINNs
+    % Learned correction term U_phi has no physical meaning
+    \addplot[
+        only marks,
+        mark=square*,
+        mark size=2.8pt,
+        black
+    ] coordinates {(8.8,5.2)};
+    % NN / black-box: no prior knowledge (triangle)
+    \addplot[
+        only marks,
+        mark=triangle*,
+        mark size=3.4pt,
+        black
+    ] coordinates {(9.5,1.5)};
+    % Labels
+    \node[anchor=south west, font=\small] at (axis cs:2.0,9.0)  {OEM};
+    \node[anchor=south west, font=\small] at (axis cs:5.0,7.5)  {SINDy};
+    \node[anchor=south west, font=\small] at (axis cs:7.55,6.5) {PINNs};
+    \node[anchor=north west, font=\small] at (axis cs:8.85,5.2) {UDEs};
+    \node[anchor=north east, font=\small, align=right] at (axis cs:9.45,1.45) {NN\\(black-box)};
+    % Legend
+    \node[
+        draw=black,
+        fill=white,
+        font=\scriptsize,
+        align=left,
+        anchor=north west
+    ] at (axis cs:0.55,3.35) {%
+    \begin{tabular}{@{}l l@{}}
+\tikz \draw[fill=black] (0,0) circle (1.6pt); & High prior knowledge required \\
+\tikz \draw[fill=black] (0,0) rectangle (3pt,3pt); & Moderate prior knowledge required \\
+\tikz \draw[fill=black] (0,0) -- (3.0pt,0) -- (1.5pt,2.6pt) -- cycle; & No prior knowledge required
+\end{tabular}
+    };
+\end{axis}
+\end{tikzpicture}
+\caption{Qualitative positioning of representative aircraft system identification approaches
+in terms of interpretability and flexibility. Marker shape indicates the approximate level
+of prior physical knowledge required by each method.}
+\label{fig:interp_flex_bw}
+\end{figure}
+\subsection{Existing  System Identification Surveys:}
+While there are several meta-reviews that have been created throughout the years but so far none have gone into detail tracking the development from classical parametric system identification methods to the modern development of interpretable parsimonious nonparametric methods. They typically only cover classical methods \cite{astrom_numerical_1965}, classical methods or modern nonparametric methods in isolation \cite{makke_interpretable_2024,dong2025recent,fu_research_2013} without analyzing the broader implications such development have on the field of system identification as a whole. Likewise, many aerospace-centric reviews \cite{bucharles_overview_2012,mehra_time-domain_2004} dismiss modern non-parametric methods as insufficiently robust for safety-critical use because neural networks are hard to interpret, overlooking newer system-identification techniques that yield parsimonious nonlinear models with minimal prior knowledge. These properties are particularly beneficial for aerospace applications due to the unpredictable and often nonlinear factors experienced by aircraft in flight such as wind, aeroelasticity, and icing effects. 
+% The Fig.~\ref{fig:taxonomy} organizes some of the SysID methods according to their reliance on prior knowledge versus their structural flexibility. Approaches near the grey region incorporate strong physical assumptions, whereas those in the black region function as true black-box models with no prior model information. }
+
+% \begin{figure}[hbt!]
+%     \centering
+%     \includesvg[width=0.6\linewidth]{taxonomy2} % your SVG file name (without .svg)
+%     \caption{Taxonomy of system identification methods}
+%     \label{fig:taxonomy}
+% \end{figure}
+
+\section{Problem Formulation: 3 DOF Aircraft Longitudinal Model}\label{sec:prob}
+The different system identification approaches would be investigated using a 3 DOF longitudinal aircraft motion, which means the aircraft is in a wings-level condition (\cite{StevensLewis2015}). In such a state, roll angle $\phi = 0$, and $\dot{\theta}=Q$. The side slip is assumed to be small, hence $\gamma = \theta - \alpha$.\\
+Let $\{\mathbf{e}\}$, $\{\mathbf{w}\}$, and $\{\mathbf{b}\}$ denote the inertial, wind, and body frames, respectively.
+\subsection*{States and Identified Parameter Vector}
+The four flight-dynamic states and actuated control inputs are
+\begin{align}
+    \mathbf{x}_f &= \begin{bmatrix} V & \alpha & \gamma & Q \end{bmatrix}^{\!\top}, &
+    \mathbf{u}   &= \begin{bmatrix} T_{\mathrm{}} & \delta_{e} \end{bmatrix}^{\!\top},
+\end{align}
+where $T_{\mathrm{}}$ and $\delta_{e,\mathrm{}}$ are the post-actuator (realized)
+thrust and elevator deflection.
+The aerodynamic parameter vector to be identified is
+\begin{equation}
+    \boldsymbol{\theta}_p =
+    \begin{bmatrix}
+        C_{L_0} & C_{L_\alpha} & C_{D_0} & k & C_{M_0} & C_{M_\alpha} & C_{M_Q} & C_{M_e}
+    \end{bmatrix}^{\!\top}.
+\end{equation}
+\subsection*{Aerodynamic Model and Loads}
+\subsection*{Aerodynamic Model}
+
+Dynamic pressure is $\bar{q} = \tfrac{1}{2}\rho V^{2}$.
+Aerodynamic forces and the pitching moment are computed as
+\begin{equation}
+    L = C_{L}\,\bar{q}\,S,
+    \qquad
+    D = C_{D}\,\bar{q}\,S,
+    \qquad
+    M = C_{M}\,\bar{q}\,S,
+    \label{eq:aero_loads}
+\end{equation}
+with conventional coefficient expansions
+\begin{align}
+    C_{L} &= C_{L_0} + C_{L_\alpha}\,\alpha,
+    \label{eq:CL}\\
+    C_{D} &= C_{D_0} + k\,C_{L}^{2},
+    \label{eq:CD}\\
+    C_{M} &= C_{M_0}
+           + C_{M_\alpha}\,\alpha
+           + C_{M_{\delta_e}}\,\delta_{e,\mathrm{act}}
+           + C_{M_Q}\,Q.
+    \label{eq:CM}
+\end{align}
+
+The nominal parameter vector above is the structure available to the classical
+fixed-form methods. The true simulator intentionally contains additional
+unknown nonlinear aerodynamic terms,
+\[
+\mathbf{C}_{\mathrm{true}}(\mathbf{x},\mathbf{u})
+=
+\mathbf{C}_{\mathrm{nom}}(\mathbf{x},\mathbf{u};\boldsymbol{\theta}_p)
++\Delta\mathbf{C}_{\mathrm{aero}}(\mathbf{x},\mathbf{u}),
+\]
+where $\Delta\mathbf{C}_{\mathrm{aero}}=[\Delta C_L,\Delta C_D,\Delta C_M]^T$ is
+not supplied to the identification algorithms. The residual terms used to
+generate the data are smooth and bounded:
+\begin{align}
+\Delta C_L &=
+0.018\tanh^2(1.4\alpha_r)
++0.010\sin(1.8\delta_r)
++0.012\alpha_r q_r,\\
+\Delta C_D &=
+0.006\alpha_r^4
++0.004\delta_r^2
++0.003\left[1+\tanh(3(\alpha-0.13))\right],\\
+\Delta C_M &=
+-0.010\alpha_r^3
++0.006\alpha_r\delta_r
++0.005\tanh(q_r)|\alpha_r|
++0.0025\sin(2\gamma),
+\end{align}
+with normalized variables
+\[
+V_r=(V-15)/15,\qquad
+\alpha_r=\alpha/0.20,\qquad
+q_r=\mathrm{sat}(Q/0.8),\qquad
+\delta_r=\delta_e/0.25.
+\]
+These terms are deliberately close to the nominal model near trim but nonlinear
+off trim. They create model-form error for fixed-structure OEM and equation
+error fits, while providing a known ground truth for evaluating coefficient
+closure and residual-learning methods.
+
+\paragraph{Note on pitching-moment normalisation.}
+The expression $M = C_{M}\bar{q}S$ in \eqref{eq:aero_loads} omits the
+reference chord $\bar{c}$ that appears in the standard convention ($M_{\mathrm{std}} = C_{M}^{\mathrm{std}}\bar{q}S\bar{c}$).
+The simulation does not define $\bar{c}$ as a separate parameter; all
+pitching-moment derivatives in \eqref{eq:CM} therefore implicitly absorb one
+power of $\bar{c}$ and their numerical values are not directly comparable to
+standard tabulated stability derivatives.
+In particular, $C_{M_Q}$ as used here is a {dimensional} pitch-damping
+derivative with units $\mathrm{s\,rad^{-1}}$, absorbing the factor
+$\bar{c}/(2V)$ from the conventional nondimensional pitch rate
+$\hat{q} = Q\bar{c}/(2V)$.
+\subsection*{Equations of Motion (3-DoF Longitudinal)}
+The equations governing the pure longitudinal motion are:
+\begin{equation}
+\boxed{
+\begin{aligned}
+\dot{V}      &= \frac{-D + T\cos\alpha - mg\sin\gamma}{m},\\[3pt]
+\dot{\gamma} &= \frac{L + T\sin\alpha - mg\cos\gamma}{mV},\\[3pt]
+\dot{Q}      &= \frac{M}{J_y},\\[3pt]
+\dot{\alpha} &= Q - \dot{\gamma}.
+\end{aligned}}
+\label{eq:eom}
+\end{equation}
+\subsection*{Simulation Constants and Defaults}
+Table~\ref{tab:simulation_defaults} lists the default constants used by the
+current Python benchmark. These values are not intended to represent a specific
+certified aircraft; they define a reproducible small fixed-wing longitudinal
+test problem against which the identification methods are compared.
+
+\begingroup
+\small
+\begin{longtable}{@{}p{0.24\linewidth}p{0.33\linewidth}p{0.35\linewidth}@{}}
+\caption{Default simulator and benchmark constants used in the generated datasets.}
+\label{tab:simulation_defaults}\\
+\toprule
+Quantity & Value & Code source or role \\
+\midrule
+\endfirsthead
+\toprule
+Quantity & Value & Code source or role \\
+\midrule
+\endhead
+Mass $m$ & $1.0$ kg & \texttt{Aircraft.mass} \\
+Pitch inertia $J_y$ & $0.15$ kg m$^2$ & \texttt{Aircraft.jy} \\
+Reference area $S$ & $0.25$ m$^2$ & \texttt{Aircraft.wing\_area} \\
+Air density $\rho$ & $1.225$ kg/m$^3$ & \texttt{Aircraft.rho} \\
+Gravity $g$ & $9.81$ m/s$^2$ & \texttt{Aircraft.gravity} \\
+Nominal $C_{L0}, C_{L\alpha}$ & $0.10,\;3.00$ & \texttt{NominalAero} \\
+Nominal $C_{D0}, k$ & $0.030,\;0.10$ & \texttt{NominalAero} \\
+Nominal $C_{M0}, C_{M\alpha}$ & $0.010,\;-0.100$ & \texttt{NominalAero} \\
+Nominal $C_{MQ}, C_{M\delta_e}$ & $-0.100,\;0.100$ & \texttt{NominalAero} \\
+Sample time $\Delta t$ & $0.01$ s & locked 100 Hz mocap rate \\
+Trajectory duration & $40$ s & \texttt{SimulationConfig.duration} \\
+Training/validation trials & $64/16$ & \texttt{SimulationConfig} \\
+Direct-state noise std. & $[0.08,0.0035,0.0035,0.012]$ & $[V,\alpha,\gamma,Q]$ \\
+Mocap noise std. & $0.002$ m, $0.0015$ rad & $[p_x,p_z,\theta]$ \\
+Mocap smoothing window & $21$ samples & moving average in simulator; Savitzky--Golay in comparison suite \\
+Thrust actuator & $\tau_T=0.12$ s, $|\dot{T}|\le 7.0$ N/s, $T\in[0,3]$ N & actuator lag/rate/saturation \\
+Elevator actuator & $\tau_e=0.055$ s, $|\dot{\delta}_e|\le 2.4$ rad/s, $\delta_e\in[-0.35,0.35]$ rad & actuator lag/rate/saturation \\
+SAFE blend $\beta$ & $0.85$ & hidden-controller simulator \\
+SAFE pitch gain $K_\theta$ & $3.0$ & hidden-controller simulator \\
+SAFE elevator gain $K_q$ & $0.105$ & hidden-controller simulator \\
+AS3X pitch-rate damping & $0.018$ & hidden-controller simulator \\
+Recovery gates & $\alpha_{\lim}=0.110$ rad, $V_{\lim}=13.0$ m/s & hidden-controller simulator \\
+\bottomrule
+\end{longtable}
+\endgroup
+\subsection*{Indoor Disturbance Assumption}
+
+The motivating experiment takes place in an indoor aircraft hangar, so
+atmospheric gusts are not treated as a primary uncertainty source in the
+current benchmark. The generated datasets therefore disable the colored
+process-disturbance channel by default. The dominant practical mismatch is
+instead input uncertainty: the experimenter observes the external pilot
+command, while the off-the-shelf vehicle may internally reshape that command
+through actuator dynamics and a proprietary SAFE/AS3X stabilization loop.
+
+\subsection*{Measurement and Input Model}
+
+The oracle diagnostic channel provides the four flight-dynamic states
+corrupted by additive white Gaussian noise:
+\begin{equation}
+    \mathbf{y} =
+    \begin{bmatrix} V \\ \alpha \\ \gamma \\ Q \end{bmatrix}
+    + \boldsymbol{v},
+    \qquad
+    \boldsymbol{v} \sim
+    \mathcal{N}\!\left(\mathbf{0},\;
+        R\right),
+    \quad
+    R = \mathrm{diag}\!\left(
+        \sigma_{V}^{2},\;
+        \sigma_{\alpha}^{2},\;
+        \sigma_{\gamma}^{2},\;
+        \sigma_{Q}^{2}
+    \right),
+    \label{eq:meas}
+\end{equation}
+where the direct-state channel is used only to diagnose algorithm behavior.
+The practical input supplied to the identification methods is the external
+pilot command,
+\[
+\mathbf{u}_{\mathrm{cmd}} = [T_{\mathrm{cmd}},\delta_{e,\mathrm{pilot}}]^T.
+\]
+When SAFE is disabled, this command passes only through actuator lag and rate
+limits before entering the plant. When SAFE is enabled, the simulator inserts
+a hidden longitudinal projection of the proprietary controller between the
+pilot command and the elevator actuator. The true realized input
+$\mathbf{u}_{\mathrm{act}}$ and the hidden SAFE correction are retained in the
+dataset for scoring and diagnostics, but the practical identification runs use
+only $\mathbf{u}_{\mathrm{cmd}}$.
+
+\subsection*{Hidden SAFE/AS3X Pitch Loop}
+The real Sport Cub S2 firmware is proprietary, so the benchmark uses an
+engineering approximation of the longitudinal part of a SAFE/AS3X controller.
+This model is not intended to claim the true Horizon/Spektrum implementation.
+It creates a controlled hidden-input problem that is plausible for an
+off-the-shelf trainer: the pilot commands throttle and elevator, while an
+internal pitch-attitude/rate loop reshapes elevator before the plant sees it.
+
+The estimated pitch attitude is
+\[
+\theta = \alpha + \gamma,
+\]
+and throttle creates a mode-dependent pitch bias,
+\begin{equation}
+    \theta_{\mathrm{thr}} =
+    \frac{1}{2}\,\mathrm{interp}
+    \left(T_{\mathrm{cmd}}/T_{\max};
+    [0,0.5,1],[-5^\circ,0^\circ,8^\circ]\right).
+\end{equation}
+The pilot elevator command is mapped to a bounded pitch command,
+\begin{equation}
+    \theta_{\mathrm{cmd}}
+    = \theta_0 + \theta_{\mathrm{thr}}
+    + K_{\delta}\,\delta_{e,\mathrm{stick}},
+    \qquad
+    \delta_{e,\mathrm{stick}}
+    = \mathrm{sat}\left(\frac{\delta_{e,\mathrm{pilot}}-\delta_{e,\mathrm{trim}}}{0.20}\right).
+\end{equation}
+The SAFE outer loop produces a pitch-rate command and elevator correction,
+\begin{align}
+    q_{\mathrm{cmd}} &= \mathrm{sat}\left(K_\theta(\theta_{\mathrm{cmd}}-\theta)\right),\\
+    \delta_{e,\mathrm{SAFE}} &= \delta_{e,\mathrm{trim}} + K_q(q_{\mathrm{cmd}}-q).
+\end{align}
+The AS3X-like inner-loop contribution is modeled as direct pilot elevator plus
+pitch-rate damping,
+\begin{equation}
+    \delta_{e,\mathrm{AS3X}} = \delta_{e,\mathrm{pilot}} - K_{\mathrm{AS3X}}q.
+\end{equation}
+Finally, a smooth recovery gate activates a stronger pitch-recovery law near
+high angle of attack or low airspeed,
+\begin{equation}
+    r = 1 - (1-\sigma_\alpha)(1-\sigma_V),
+    \quad
+    \sigma_\alpha=\sigma\!\left(\frac{\alpha-\alpha_{\lim}}{s_\alpha}\right),
+    \quad
+    \sigma_V=\sigma\!\left(\frac{V_{\lim}-V}{s_V}\right),
+\end{equation}
+and the internal elevator command becomes
+\begin{equation}
+    \delta_{e,\mathrm{int}}
+    = (1-r)\left(\beta\delta_{e,\mathrm{SAFE}}+(1-\beta)\delta_{e,\mathrm{AS3X}}\right)
+    + r\delta_{e,\mathrm{panic}}.
+    \label{eq:safe_loop}
+\end{equation}
+The internal throttle is not closed-loop controlled in this benchmark,
+$T_{\mathrm{int}}=T_{\mathrm{cmd}}$. This matches the intended use of the
+3-DoF model: we test whether unobserved longitudinal elevator reshaping can
+confound or be learned by system-identification methods, while avoiding an
+unjustified full 6-DoF roll/yaw SAFE model.
+
+\subsection*{Actuator Dynamics}
+Both effectors are modelled as first-order lags with position saturation and rate
+limiting:
+\begin{align}
+    \dot{T}_{\mathrm{act}}
+        &= \frac{T_{\mathrm{cmd}} - T_{\mathrm{act}}}{\tau_T},
+    & T_{\mathrm{act}}   &\in [0,\;3]\;\text{N},
+    & |\dot{T}_{\mathrm{act}}|   &\le 7.0\;\text{N/s},
+    & \tau_T   &= 0.12\;\text{s},
+    \label{eq:Tact}\\[4pt]
+    \dot{\delta}_{e,\mathrm{act}}
+        &= \frac{\delta_{e,\mathrm{cmd}} - \delta_{e,\mathrm{act}}}{\tau_e},
+    & \delta_{e,\mathrm{act}} &\in [-0.35,\;0.35]\;\text{rad},
+    & |\dot{\delta}_{e,\mathrm{act}}| &\le 2.4\;\text{rad/s},
+    & \tau_e   &= 0.055\;\text{s}.
+    \label{eq:eact}
+\end{align}
+Saturation and rate limits introduce dynamics absent from the nominal
+model~\eqref{eq:eom}, causing structural mismatch when identification uses only
+the external pilot command.
+\subsection*{Test Cases} \label{subsec:testcase}
+The current comparison uses five reproducible datasets. The \texttt{open\_loop}
+dataset uses randomized pilot commands with SAFE disabled. The
+\texttt{sine\_sweep} dataset uses elevator sine sweeps with SAFE disabled for
+frequency-response diagnostics. The \texttt{open\_loop\_safe} and
+\texttt{sine\_sweep\_safe} datasets repeat those excitation families with the
+hidden SAFE/AS3X pitch loop enabled. The \texttt{safe\_loop} dataset uses
+recovery-probe pilot inputs with pull-up and throttle-reduction segments that
+make the hidden loop observable. These cases separate three effects: excitation
+quality, motion-capture state reconstruction, and unobserved proprietary
+command reshaping.
+
+For the motion-capture experiments motivating this benchmark, the primary measured outputs are not the aerodynamic states themselves. In the PURT pylon-racing and indoor testbed setting \citep{sribunma2026indoor}, the aircraft are small commercial fixed-wing vehicles and the only reliable ground-truth measurement is the external motion-capture track. No pitot-static system, onboard IMU, or direct angle-of-attack sensor is assumed. A typical laboratory system provides inertial position and attitude at approximately 100 Hz,
+\[
+\mathbf{y}_{\mathrm{mocap},k} =
+\begin{bmatrix}
+p_{x,k} & p_{z,k} & \theta_k
+\end{bmatrix}^{T}
+\;+\;
+\boldsymbol{\eta}_k,
+\]
+while the longitudinal states $\mathbf{x}=[V,\alpha,\gamma,q]^T$ are latent variables. These states can be reconstructed approximately from smoothed finite differences of position and attitude, but this operation amplifies measurement noise and introduces smoothing-dependent phase lag and bandwidth loss. Therefore, the numerical study separates three cases: an oracle state-measurement case using simulated noisy $V,\alpha,\gamma,q$ directly, a derived-state case using finite-difference estimates from mocap data, and a preferred mocap-output case in which the model propagates latent flight states and compares the predicted output $h(\mathbf{x})=[p_x,p_z,\theta]^T$ directly against motion-capture measurements. The simulator retains the true state and aerodynamic residuals only for scoring and diagnostic plots; these channels are not assumed to be available to the identification algorithms in the mocap-output comparison.
+
+This distinction becomes more important as the observation rate is reduced. At 100 Hz the Nyquist frequency is 50 Hz, which is typically well above the dominant rigid-body longitudinal content of a small fixed-wing aircraft. At 10 Hz, representative of a slow GPS-like position stream, the Nyquist frequency falls to 5 Hz and derivative estimates become much more sensitive to filtering choices. At 2 Hz, the Nyquist frequency is only 1 Hz, so short-period or actuator-driven dynamics can be attenuated, aliased, or rendered practically unobservable from position and attitude alone. The lower-rate cases are therefore treated as observation-quality studies rather than changes to the aircraft dynamics.
+
+\subsection*{Benchmark Protocol}
+The current benchmark is organized around three complementary questions. First, under idealized state availability, how well do OEM, equation-error least squares, SINDy, PINN-style coefficient closure, UDE residual learning, and neural coefficient surrogates handle nominal-plus-hidden nonlinear aerodynamic terms? This oracle comparison isolates model-form error from state-reconstruction error. Second, under realistic motion-capture observation, how much performance is lost when the same methods are forced to use derived states, and how much can be recovered by fitting the measured position/attitude outputs directly? Third, when a hidden SAFE/AS3X-like loop reshapes elevator commands, can the methods distinguish missing aerodynamics from missing input dynamics?
+
+For this reason the benchmark reports separate rows for direct-state and mocap-derived-state training where applicable. The direct-state case uses noisy measurements of $V,\alpha,\gamma,q$ and should be interpreted as an upper-bound diagnostic for algorithms that require state histories or state derivatives. The mocap-derived case uses $p_x,p_z,\theta$ sampled at 100 Hz and reconstructs $V,\alpha,\gamma,q$ by smoothing and finite differencing; this case is intentionally included because many practical pipelines use this preprocessing step, even though it is numerically fragile. The mocap-output OEM case instead keeps $V,\alpha,\gamma,q$ as latent states and optimizes the output error in $p_x,p_z,\theta$ using a CasADi/IPOPT nonlinear program. This is the preferred deterministic baseline for laboratory motion-capture data because it avoids differentiating the measured position and attitude channels.
+
+The observation-rate study decimates the same 100 Hz mocap stream to 10 Hz and 2 Hz before applying the state-reconstruction pipeline. This does not change the aircraft trajectory or aerodynamic model; it only changes the information available to the estimator. The resulting degradation quantifies the practical observability and sampling limitations imposed by slower sensors. As the observation rate approaches the dominant aircraft modes, Nyquist limitations and filtering tradeoffs become central rather than incidental implementation details.
+
+\subsection*{Implemented Methods}
+Each method is run from the same generated train/validation splits. Unless stated
+otherwise, methods are given the external pilot command $\mathbf{u}_{\mathrm{cmd}}$
+and either direct noisy states or states reconstructed from 100 Hz motion capture.
+The validation score is always computed against the simulator truth and is not a
+training objective. Primary ranking figures and tables report open-loop model
+rollouts driven only by the supplied pilot-command history after
+initialization. Methods may use the validation initial condition. Lagged
+input-output methods initialize their required state history from that same
+initial condition and the pilot-command history rather than from additional
+validation measurements, so validation measurements are not fed back into the
+model after rollout begins.
+
+\paragraph{Nominal model.}
+The nominal baseline propagates \eqref{eq:eom} using the nominal aerodynamic
+coefficients and no residual correction. It is included to expose the size of the
+combined aerodynamic and hidden-input model error.
+
+\paragraph{Equation-error least squares.}
+The equation-error method smooths the measured state history with a
+Savitzky--Golay filter, differentiates it, inverts the equations of motion to
+obtain inferred $C_L$, $C_D$, and $C_M$, and solves linear least-squares problems
+for the nominal coefficient vector. This is fast and interpretable, but it is
+biased by measurement noise, derivative noise, hidden actuator dynamics, and
+SAFE command reshaping.
+
+\paragraph{Output-error methods.}
+The single-shooting OEM fits the nominal aerodynamic parameters by minimizing
+trajectory output error under RK4-integrated dynamics using CasADi/IPOPT. The
+mocap-output OEM keeps $V,\alpha,\gamma,q$ latent and compares the integrated
+outputs $p_x,p_z,\theta$ directly to measured motion-capture outputs. The
+\texttt{OEM-HiddenController} variant additionally estimates the parameters of
+the SAFE-like pitch loop in \eqref{eq:safe_loop}. This last variant is an
+oracle-structure benchmark: in a real proprietary aircraft, the controller form
+is not known. It should therefore be read as an upper bound for a correctly
+structured hidden-controller estimator, not as a fair black-box discovery method.
+
+\paragraph{EKF parameter identification.}
+The EKF row initializes the nominal aerodynamic parameter vector from equation
+error and then runs an augmented-state EKF with a CasADi
+automatic-differentiated RK4 transition and parameter Jacobian on the training
+data. The augmented filter estimates the aerodynamic parameter vector from
+training measurements only. After training, the parameter vector is frozen and
+validation uses the same pilot-command-only open-loop rollout protocol as the
+other dynamics-model rows.
+
+\paragraph{Frequency-Welch.}
+The frequency-domain baseline estimates averaged input/state spectra using
+Welch-style windows, discards low-coherence frequency bins, and fits a local
+continuous-time linear model from the weighted complex relation
+$j\omega X(\omega)=AX(\omega)+BU(\omega)$. This is not CIFER; it is a compact
+spectral baseline with some of the same diagnostic ingredients. Its result
+should not be interpreted as a judgement of CIFER performance.
+
+\paragraph{Subspace, Koopman, and local linear models.}
+The linear state-space baseline fits a one-step affine discrete model by least
+squares. The Hankel/SVD subspace baseline constructs lagged input/output blocks,
+projects them onto a low-dimensional latent basis, and fits linear latent
+dynamics. The Koopman-EDMD baseline uses the same nonlinear candidate functions
+as SINDy, but fits a lifted discrete-time one-step map rather than sparse
+continuous-time derivatives. These methods are included because they can be
+strong predictors even when they do not recover physically meaningful
+aerodynamic parameters.
+
+\paragraph{SINDy and symbolic stepwise regression.}
+The SINDy row uses a structured sparse coefficient formulation. It regresses the
+EOM-inferred aerodynamic coefficients $C_L$, $C_D$, and $C_m$ on protected
+low-order aircraft terms plus a sparse residual library in one fit. Protected
+terms are always retained, while residual-library terms are selected by
+sequential thresholded least squares. The stepwise symbolic baseline remains a
+black-box sparse derivative model. Both are sensitive to derivative quality and
+to whether the library contains the true hidden mechanism. Saturations, rate
+limits, and recovery gates are especially hard because they appear only near
+boundaries unless the experiment deliberately visits those regions.
+
+\paragraph{PINN, UDE, GP/RBF, and neural surrogates.}
+The coefficient-closure PINN and UDE residual models keep the longitudinal
+equations of motion and learn missing aerodynamic or state-derivative terms with
+small neural networks trained on GPU. The GP/RBF coefficient closure is a
+sparse kernel surrogate trained on the same equation-of-motion-inferred
+coefficient residuals as the PINN-style closure. The hidden-control UDE instead learns an
+effective throttle/elevator correction from equations-of-motion residuals, and
+the hidden-elevator PINN constrains that correction to the elevator channel using
+the pitch-moment equation. The supervised coefficient surrogate uses synthetic
+labels for $\Delta\mathbf{C}_{\mathrm{aero}}$ and is therefore an upper-bound
+diagnostic rather than a flight-data-only method.
+
+\subsection*{Code-Matched Benchmark Specification}
+This subsection is intended to make the paper auditable against the Python
+implementation. The symbol $\mathbf{z}_k=[\mathbf{x}_k^T,\mathbf{u}_k^T]^T$
+denotes the state-input sample used by the regression and neural methods. When
+the command-line option \texttt{--input-channel u\_cmd} is used, the benchmark
+intentionally replaces the internal input array passed to the methods with the
+external pilot command. Thus the code variable named \texttt{u\_act} inside
+\texttt{comparison\_suite.py} should be read as the input channel supplied to
+the estimator, not necessarily the true actuator input. This convention is what
+creates the practical hidden-controller problem in the SAFE-on cases.
+
+The common smoothing and derivative pipeline used by derivative-based methods is
+\begin{align}
+    \widetilde{\mathbf{x}}_{1:N}
+        &= \mathrm{SG}_{w,p}\!\left(\mathbf{y}_{1:N}\right),\\
+    \dot{\widetilde{\mathbf{x}}}_{k}
+        &= \mathrm{gradient}\!\left(\widetilde{\mathbf{x}}_{1:N},\Delta t\right)_k,
+        \label{eq:code_derivative_pipeline}
+\end{align}
+where the current code uses a Savitzky--Golay window $w=21$ and polynomial
+order $p=3$ unless overridden. For mocap-derived runs, $\mathbf{y}_{1:N}$ is
+first replaced by the reconstructed state history obtained from
+$p_x,p_z,\theta$.
+
+\paragraph{Nominal rollout.}
+The nominal method has no training step. It sets
+$\hat{\boldsymbol{\theta}}=\boldsymbol{\theta}_{\mathrm{nom}}$ and propagates
+\[
+    \hat{\mathbf{x}}_{k+1}
+    =\Phi_{\mathrm{RK4}}
+    \left(\hat{\mathbf{x}}_k,\mathbf{u}_k,\mathbf{u}_{k+1};
+    \boldsymbol{\theta}_{\mathrm{nom}}\right),
+    \qquad
+    \hat{\mathbf{x}}_0=\mathbf{y}_0.
+    \label{eq:code_nominal}
+\]
+This is implemented by \texttt{run\_nominal}, \texttt{theta\_dynamics}, and
+\texttt{rk4\_step}.
+
+\paragraph{Equation-error least squares.}
+The equation-error method first algebraically infers aerodynamic coefficients
+from smoothed state derivatives:
+\begin{align}
+    \widehat{D}_k
+        &= T_k\cos\widetilde{\alpha}_k
+         -mg\sin\widetilde{\gamma}_k
+         -m\dot{\widetilde{V}}_k,\\
+    \widehat{L}_k
+        &= m\widetilde{V}_k\dot{\widetilde{\gamma}}_k
+         -T_k\sin\widetilde{\alpha}_k
+         +mg\cos\widetilde{\gamma}_k,\\
+    \widehat{M}_k
+        &= J_y\dot{\widetilde{Q}}_k,\\
+    \widehat{\mathbf{C}}_k
+        &= [\widehat{L}_k,\widehat{D}_k,\widehat{M}_k]^T
+           /(\bar{q}_k S).
+        \label{eq:code_inferred_coefficients}
+\end{align}
+It then solves three ordinary least-squares problems,
+\begin{align}
+    [\widehat{C}_{L0},\widehat{C}_{L\alpha}]^T
+        &= \arg\min_{\beta}\sum_k
+        \left(\widehat{C}_{L,k}-[1,\widetilde{\alpha}_k]\beta\right)^2,\\
+    [\widehat{C}_{D0},\widehat{k}]^T
+        &= \arg\min_{\beta}\sum_k
+        \left(\widehat{C}_{D,k}-[1,\widehat{C}_{L,k}^{\,2}]\beta\right)^2,\\
+    [\widehat{C}_{M0},\widehat{C}_{M\alpha},
+     \widehat{C}_{MQ},\widehat{C}_{M\delta_e}]^T
+        &= \arg\min_{\beta}\sum_k
+        \left(\widehat{C}_{M,k}
+        -[1,\widetilde{\alpha}_k,\widetilde{Q}_k,\delta_{e,k}]\beta\right)^2.
+        \label{eq:code_equation_error}
+\end{align}
+The fitted vector is clipped to the code bounds
+$[-0.5,0,0,0,-0.2,-1,-1,-0.5]\le\theta\le
+[0.5,6,0.2,0.5,0.2,0.5,0.1,0.5]$. This matches
+\texttt{infer\_coefficients} and \texttt{fit\_equation\_error}.
+
+\paragraph{Output-error single shooting.}
+The coded single-shooting OEM estimates one global aerodynamic parameter vector
+and one initial state for each selected training trajectory:
+\begin{equation}
+    \min_{\theta,\{\mathbf{x}_{0}^{(r)}\}}
+    \sum_{r\in\mathcal{R}}\sum_{k\in\mathcal{K}}\sum_{j=1}^{4}
+    \left(
+    \frac{\hat{x}_{k,j}^{(r)}-y_{k,j}^{(r)}}{\sigma_j}
+    \right)^2,
+    \qquad
+    \hat{\mathbf{x}}_{k+1}^{(r)}
+    =
+    \Phi_{\mathrm{RK4}}
+    (\hat{\mathbf{x}}_{k}^{(r)},\mathbf{u}_{k}^{(r)},\mathbf{u}_{k+1}^{(r)};
+    \theta).
+    \label{eq:code_oem_ss}
+\end{equation}
+The direct-state noise weights are
+$\sigma=[0.08,0.0035,0.0035,0.012]$. The current comparison uses CasADi/IPOPT,
+bounded parameters, bounded initial states, a selected number of trajectories,
+and a fit stride. This is the implementation in
+\texttt{run\_oem\_casadi}.
+
+\paragraph{Mocap-output OEM.}
+The mocap-output OEM uses the same aerodynamic parameterization but changes the
+output map. Position is integrated by trapezoidal quadrature,
+\begin{align}
+    \hat{p}_{x,k+1}
+        &= \hat{p}_{x,k}
+        +\frac{\Delta t}{2}
+        (\hat{V}_k\cos\hat{\gamma}_k
+        +\hat{V}_{k+1}\cos\hat{\gamma}_{k+1}),\\
+    \hat{p}_{z,k+1}
+        &= \hat{p}_{z,k}
+        +\frac{\Delta t}{2}
+        (\hat{V}_k\sin\hat{\gamma}_k
+        +\hat{V}_{k+1}\sin\hat{\gamma}_{k+1}),\\
+    \hat{\theta}_k &= \hat{\alpha}_k+\hat{\gamma}_k.
+\end{align}
+The optimization objective is
+\begin{equation}
+    \min_{\theta,\{\mathbf{x}_0^{(r)}\}}
+    \sum_{r,k}
+    \left[
+    \left(\frac{\hat{p}_{x,k}^{(r)}-p_{x,k}^{(r)}}{\sigma_p}\right)^2
+    +\left(\frac{\hat{p}_{z,k}^{(r)}-p_{z,k}^{(r)}}{\sigma_p}\right)^2
+    +\left(\frac{\hat{\theta}_{k}^{(r)}-\theta_{k}^{(r)}}{\sigma_\theta}\right)^2
+    \right],
+    \label{eq:code_oem_mocap}
+\end{equation}
+with $\sigma_p=0.002$ m and $\sigma_\theta=0.0015$ rad by default. This is
+\texttt{run\_oem\_mocap\_output\_casadi}.
+
+\paragraph{Variational-Mocap sparse MAP surrogate.}
+The coded variational row is a deterministic sparse-NLP analogue of a
+variational smoother. It optimizes aerodynamic parameters, latent flight-state
+nodes, and latent position nodes:
+\begin{align}
+    \min_{\theta,\{\mathbf{x}_k^{(r)},\mathbf{p}_k^{(r)}\}}
+    \sum_{r,k}
+    \left\|\frac{h(\mathbf{x}_k^{(r)},\mathbf{p}_k^{(r)})
+    -\mathbf{y}_{\mathrm{mocap},k}^{(r)}}{\boldsymbol{\sigma}_y}\right\|_2^2
+    &+
+    \sum_{r,k}
+    \left\|\frac{\mathbf{x}_{k+1}^{(r)}
+    -\Phi_{\mathrm{RK4}}(\mathbf{x}_{k}^{(r)},\mathbf{u}_{k}^{(r)},\mathbf{u}_{k+1}^{(r)};\theta)}
+    {\boldsymbol{\sigma}_x}\right\|_2^2 \nonumber\\
+    &+
+    \sum_{r,k}
+    \left\|\frac{\mathbf{p}_{k+1}^{(r)}
+    -\Psi_p(\mathbf{p}_{k}^{(r)},\mathbf{x}_{k}^{(r)},\mathbf{x}_{k+1}^{(r)})}
+    {\sigma_{p,\mathrm{proc}}}\right\|_2^2 .
+    \label{eq:code_variational_mocap}
+\end{align}
+Here $h=[p_x,p_z,\alpha+\gamma]^T$ and $\Psi_p$ is the same trapezoidal
+position update used by mocap-output OEM. This matches
+\texttt{run\_variational\_mocap\_output\_casadi}; it should not be read as a
+full posterior VI implementation because no covariance or amortized posterior
+is learned.
+
+\paragraph{OEM with hidden SAFE-like controller.}
+The hidden-controller OEM uses the same objective as
+\eqref{eq:code_oem_ss}, but the plant input is
+\[
+    \mathbf{u}_{\mathrm{int},k}
+    =
+    g_{\mathrm{SAFE}}(\mathbf{x}_k,\mathbf{u}_{\mathrm{cmd},k};
+    \psi,\mathbf{u}_{\mathrm{trim}}),
+\]
+where $g_{\mathrm{SAFE}}$ has the same algebraic structure as
+\eqref{eq:safe_loop}. The decision vector is
+$[\theta^T,\psi^T,\mathbf{x}_{0}^{(1)T},\ldots]^T$ and the coded objective is
+\begin{equation}
+    \min_{\theta,\psi,\{\mathbf{x}_0^{(r)}\}}
+    \sum_{r,k,j}
+    \left(\frac{\hat{x}_{k,j}^{(r)}-y_{k,j}^{(r)}}{\sigma_j}\right)^2
+    +10^{-2}\|\psi-\psi_0\|_2^2.
+    \label{eq:code_oem_hidden}
+\end{equation}
+The controller vector is
+$\psi=[\theta_0,K_T,K_\delta,K_\theta,K_q,K_{\mathrm{AS3X}},
+\alpha_{\lim},V_{\lim},\Delta\theta_{\mathrm{panic}},
+K_{\theta,\mathrm{panic}},K_{q,\mathrm{panic}},\beta]^T$.
+This is an intentionally optimistic oracle-structure estimator implemented in
+\texttt{run\_oem\_hidden\_controller}.
+
+\paragraph{EKF parameter identification.}
+The EKF parameter-identification row first fits $\theta$ with equation-error
+LS, then runs an augmented-state EKF on the training split. The augmented state
+is $\mathbf{z}_k=[\mathbf{x}_k^T,\boldsymbol{\theta}^T]^T$, where
+$\boldsymbol{\theta}$ is modeled as a random walk with small process noise. The
+RK4 transition and both Jacobians are generated by CasADi automatic
+differentiation:
+\begin{align}
+    \hat{\mathbf{x}}_{k+1|k}
+        &=F(\hat{\mathbf{x}}_{k|k},\mathbf{u}_k,\mathbf{u}_{k+1},
+            \hat{\boldsymbol{\theta}}_{k|k},\Delta t),\\
+    A_k &= \frac{\partial F}{\partial \mathbf{x}},
+    \qquad
+    B_k = \frac{\partial F}{\partial \boldsymbol{\theta}}.
+    \label{eq:code_ekf}
+\end{align}
+Training measurements update both state and parameter estimates inside the EKF
+recursion. The final parameter estimate is then frozen, and validation is scored
+by integrating the identified dynamics open loop from the validation initial
+condition using only the pilot-command sequence. This is
+\texttt{run\_filter\_error\_ekf}, reported as \texttt{EKF-ParamID}.
+
+\paragraph{Linear-SS.}
+The local affine discrete state-space baseline solves
+\begin{equation}
+    \widehat{C}
+    =
+    \arg\min_C
+    \sum_k
+    \left\|
+    \mathbf{x}_{k+1}
+    -
+    [1,\mathbf{x}_k^T,\mathbf{u}_k^T]C
+    \right\|_2^2,
+    \qquad
+    \hat{\mathbf{x}}_{k+1}
+    =
+    [1,\hat{\mathbf{x}}_k^T,\mathbf{u}_k^T]\widehat{C}.
+    \label{eq:code_linear_ss}
+\end{equation}
+This is \texttt{run\_linear\_state\_space}.
+
+\paragraph{Subspace-Hankel.}
+For a past window $p$, the code builds lagged features
+\[
+    \mathbf{f}_k =
+    [\mathbf{x}_{k-p+1}^T,\ldots,\mathbf{x}_k^T,
+     \mathbf{u}_{k-p+1}^T,\ldots,\mathbf{u}_k^T]^T.
+\]
+After centering, an SVD basis $B$ is formed from the first $n_z$ right singular
+vectors and $\mathbf{z}_k=(\mathbf{f}_k-\bar{\mathbf{f}})^TB$. The identified
+latent model is
+\begin{align}
+    \mathbf{z}_{k+1} &\approx [1,\mathbf{z}_k^T,\mathbf{u}_k^T]A_z,\\
+    \mathbf{x}_{k} &\approx [1,\mathbf{z}_k^T,\mathbf{u}_k^T]C_z.
+    \label{eq:code_subspace}
+\end{align}
+The current defaults are $p=12$ and $n_z=6$. This is
+\texttt{run\_subspace\_hankel}.
+
+\paragraph{Koopman-EDMD.}
+The EDMD row uses the same library $\Theta(\mathbf{x},\mathbf{u})$ as
+\eqref{eq:code_sindy_library}, but fits a discrete lifted map rather than
+continuous-time derivatives. With standardized library columns
+$\bar{\Theta}$, the code solves
+\begin{equation}
+    \widehat{K}_x
+    =
+    \arg\min_K
+    \|\mathbf{X}_{k+1}-\bar{\Theta}(\mathbf{x}_k,\mathbf{u}_k)K\|_F^2
+    +\lambda\|K\|_F^2.
+    \label{eq:code_koopman_edmd}
+\end{equation}
+Validation then iterates
+\[
+    \hat{\mathbf{x}}_{k+1}
+    =
+    \bar{\Theta}(\hat{\mathbf{x}}_k,\mathbf{u}_k)\widehat{K}_x.
+\]
+This is a compact EDMD-style lifted predictor implemented in
+\texttt{fit\_koopman\_edmd} and \texttt{run\_koopman\_edmd}. It should be
+interpreted as a predictive surrogate, not as an aerodynamic-parameter
+estimator.
+
+\paragraph{Frequency-Welch.}
+The frequency-domain method fits the same continuous-time linear form as a
+local state-space model,
+\begin{equation}
+    \dot{\mathbf{x}}=\mathbf{c}+A\mathbf{x}+B\mathbf{u}.
+\end{equation}
+For each Hann-windowed segment, the zero-mean Fourier coefficient of
+$[\mathbf{x}^T,\mathbf{u}^T]^T$ is $\mathbf{Z}(\omega)$. The target is
+$j\omega\mathbf{X}(\omega)$, and the code solves
+\begin{equation}
+    \widehat{G}
+    =
+    \arg\min_G
+    \sum_{\omega\in\Omega}
+    w_\omega^2
+    \left\|
+    j\omega\mathbf{X}(\omega)
+    -
+    \mathbf{Z}(\omega)^TG
+    \right\|_2^2
+    +\lambda\|G\|_F^2,
+    \label{eq:code_frequency}
+\end{equation}
+then sets
+$\widehat{\mathbf{c}}=\overline{\dot{\mathbf{x}}}
+-\overline{[\mathbf{x}^T,\mathbf{u}^T]}\widehat{G}$.
+The retained bins satisfy the coded frequency and coherence gates. This is
+\texttt{fit\_frequency\_linear\_model}; it is a Welch/ETFE-inspired baseline,
+not CIFER.
+
+\paragraph{SINDy and stepwise symbolic regression.}
+Both sparse-regression methods use the same library
+\begin{multline}
+\Theta(\mathbf{x},\mathbf{u})=
+[1,V,\alpha,\gamma,Q,T,\delta_e,V\alpha,V\gamma,\alpha Q,Q\delta_e,
+T\alpha,\\
+\alpha^2,\gamma^2,Q^2,\delta_e^2,\sin\alpha,\sin\gamma,\cos\alpha,\cos\gamma].
+\label{eq:code_sindy_library}
+\end{multline}
+The implemented SINDy row does not rediscover the full vector field from
+scratch. The equations of motion are inverted on the training samples to form
+inferred coefficients
+$\widehat{\mathbf{c}}=[\widehat{C}_L,\widehat{C}_D,\widehat{C}_m]$. Each
+coefficient is then fit with a protected low-order aircraft library and a sparse
+residual library:
+\begin{align}
+    \widehat{C}_L &\approx
+        [1,\alpha]\beta_L+\Theta_{L,\mathrm{res}}\xi_L,\\
+    \widehat{C}_D &\approx
+        [1,\alpha,\alpha^2]\beta_D+\Theta_{D,\mathrm{res}}\xi_D,\\
+    \widehat{C}_m &\approx
+        [1,\alpha,Q,\delta_e]\beta_m+\Theta_{m,\mathrm{res}}\xi_m.
+        \label{eq:code_sindy_structured}
+\end{align}
+The protected $\beta$ terms are not thresholded. The residual terms are
+standardized, initialized by ridge regression, and then refit by sequential
+hard-thresholded least squares for eight iterations:
+\begin{equation}
+    \xi_{\mathcal{A},j}
+    =
+    \arg\min_\beta
+    \|\widehat{c}_j-\Theta_{\mathcal{P},j}\beta_{\mathcal{P}}
+      -\Theta_{\mathcal{A},j}\beta\|_2^2
+    +\lambda\|\beta\|_2^2,
+    \qquad
+    \mathcal{A}=\{i:|\xi_{ij}|\ge\tau\}.
+\end{equation}
+Validation integrates the flight-dynamics ODE using the learned coefficient
+functions from \eqref{eq:code_sindy_structured}, initialized from the validation
+initial condition and driven only by the pilot-command history. Thus SINDy is
+compared as a sparse aerodynamic-closure method rather than as an unconstrained
+black-box state-derivative model.
+The stepwise symbolic baseline greedily adds terms that reduce
+\[
+    \log(\mathrm{MSE})+
+    \rho\,n_{\mathrm{terms}}\log(N)/N
+\]
+and then refits ridge coefficients on the selected support. These correspond to
+\texttt{fit\_sindy} and \texttt{fit\_symbolic\_stepwise}.
+
+\paragraph{UDE residual.}
+The UDE residual target is the measured derivative error relative to the
+nominal model,
+\begin{equation}
+    \mathbf{r}_k
+    =
+    \dot{\widetilde{\mathbf{x}}}_k
+    -
+    f_{\mathrm{nom}}(\widetilde{\mathbf{x}}_k,\mathbf{u}_k;
+    \boldsymbol{\theta}_{\mathrm{nom}}).
+\end{equation}
+A tanh MLP $\mathcal{N}_\phi$ is trained with normalized mean-square error, and
+validation rollouts use
+\begin{equation}
+    \dot{\hat{\mathbf{x}}}
+    =
+    f_{\mathrm{nom}}(\hat{\mathbf{x}},\mathbf{u};
+    \boldsymbol{\theta}_{\mathrm{nom}})
+    +g_{\mathrm{UDE}}\mathcal{N}_\phi(\hat{\mathbf{x}},\mathbf{u}).
+    \label{eq:code_ude}
+\end{equation}
+The source-aware rollout gain is $g_{\mathrm{UDE}}=1$ for direct-state runs and
+$0.1$ for mocap-derived runs unless overridden. This is \texttt{run\_ude}.
+
+\paragraph{PINN-style coefficient closure.}
+The implemented PINN-style closure does not enforce CFD or an assumed complete
+aerodynamic model. Instead it uses \eqref{eq:code_inferred_coefficients} to form
+training targets
+\begin{equation}
+    \Delta\widehat{\mathbf{C}}_k
+    =
+    \widehat{\mathbf{C}}_k
+    -
+    \mathbf{C}_{\mathrm{nom}}(\widetilde{\mathbf{x}}_k,\mathbf{u}_k;
+    \boldsymbol{\theta}_{\mathrm{nom}}),
+\end{equation}
+trains an MLP $\mathcal{N}_{C,\phi}$, and rolls out
+\begin{equation}
+    \dot{\hat{\mathbf{x}}}
+    =
+    f\!\left(
+    \hat{\mathbf{x}},\mathbf{u},
+    \mathbf{C}_{\mathrm{nom}}(\hat{\mathbf{x}},\mathbf{u})
+    +g_{\mathrm{PINN}}\mathcal{N}_{C,\phi}(\hat{\mathbf{x}},\mathbf{u})
+    \right).
+    \label{eq:code_pinn_closure}
+\end{equation}
+The default gains match the UDE defaults. This is
+\texttt{run\_pinn\_closure}.
+
+\paragraph{GP/RBF coefficient closure.}
+The GP-style row uses the same inferred coefficient-residual target
+$\Delta\widehat{\mathbf{C}}_k$ as the PINN-style closure, but replaces the MLP
+with a sparse radial-basis expansion. After standardizing
+$\mathbf{z}_k=[\mathbf{x}_k^T,\mathbf{u}_k^T]^T$, the code selects $M$ centers
+$\mathbf{c}_m$ from the training data and forms
+\begin{equation}
+    \phi_m(\mathbf{z})
+    =
+    \exp\!\left(
+        -\frac{\|\bar{\mathbf{z}}-\mathbf{c}_m\|_2^2}{2\ell^2}
+    \right),
+    \qquad
+    \Phi=[1,\phi_1,\ldots,\phi_M].
+\end{equation}
+The coefficient residual weights are obtained from
+\begin{equation}
+    \widehat{W}_{\mathrm{GP}}
+    =
+    \arg\min_W
+    \|\Delta\widehat{\mathbf{C}}-\Phi W\|_F^2
+    +\lambda\|W\|_F^2.
+    \label{eq:code_gp_closure}
+\end{equation}
+This finite-basis kernel-ridge model is a sparse approximation to an RBF
+Gaussian-process coefficient surrogate. It provides a classical
+uncertainty-aware surrogate family in the benchmark taxonomy, although the
+current implementation reports only mean predictions and training loss rather
+than posterior variance. This is \texttt{run\_gp\_coeff\_closure}.
+
+\paragraph{Hidden-control UDE and hidden-elevator PINN.}
+For hidden-control learning, the code first infers the effective input that
+would make the nominal model match the measured derivatives:
+\begin{align}
+    T_{\mathrm{eff},k}
+    &=
+    \frac{
+    m\dot{\widetilde{V}}_k
+    +D_{\mathrm{nom},k}
+    +mg\sin\widetilde{\gamma}_k}
+    {\max(\cos\widetilde{\alpha}_k,0.25)},\\
+    \delta_{e,\mathrm{eff},k}
+    &=
+    \frac{
+    J_y\dot{\widetilde{Q}}_k/(\bar{q}_kS)
+    -C_{M0}-C_{M\alpha}\widetilde{\alpha}_k-C_{MQ}\widetilde{Q}_k}
+    {C_{M\delta_e}}.
+\end{align}
+The target correction is
+$\Delta\mathbf{u}_k=[T_{\mathrm{eff},k},\delta_{e,\mathrm{eff},k}]^T
+-\mathbf{u}_k$, clipped to $[-0.45,0.45]$ N in throttle and
+$[-0.22,0.22]$ rad in elevator. The hidden-control UDE learns both channels and
+rolls out
+\[
+    \dot{\hat{\mathbf{x}}}
+    =
+    f_{\mathrm{nom}}\!\left(
+    \hat{\mathbf{x}},
+    \mathrm{clip}(\mathbf{u}+\mathcal{N}_{u,\phi}(\hat{\mathbf{x}},\mathbf{u}))
+    \right).
+\]
+The hidden-elevator PINN uses the same target but constrains the throttle
+correction to zero and learns only $\Delta\delta_e$. These are
+\texttt{run\_ude\_hidden\_control} and \texttt{run\_pinn\_hidden\_control}.
+
+\paragraph{Supervised coefficient surrogate.}
+The neural coefficient surrogate is an oracle upper-bound row. It trains the
+same MLP architecture directly on simulator labels
+\[
+    \Delta\mathbf{C}_{\mathrm{aero},k}
+    =
+    \mathbf{C}_{\mathrm{true},k}-\mathbf{C}_{\mathrm{nom},k},
+\]
+which are not available in real flight data. This is
+\texttt{run\_supervised\_coeff\_surrogate}.
+
+\paragraph{Implementation audit map.}
+Table~\ref{tab:code_audit_map} records where each mathematical statement above
+is implemented. The table is deliberately included in the paper because the
+benchmark is meant to be reproducible, not merely illustrative.
+
+\begin{longtable}{@{}p{0.22\linewidth}p{0.29\linewidth}p{0.39\linewidth}@{}}
+\caption{Code-to-equation audit map for the current benchmark implementation.}
+\label{tab:code_audit_map}\\
+\toprule
+Benchmark component & Equations in this document & Python implementation \\
+\midrule
+\endfirsthead
+\toprule
+Benchmark component & Equations in this document & Python implementation \\
+\midrule
+\endhead
+Simulator plant and residual aerodynamics &
+\eqref{eq:aero_loads}--\eqref{eq:eom} &
+\texttt{methods/simulation/longitudinal.py}: \texttt{nominal\_coefficients},
+\texttt{nonlinear\_residual\_coefficients}, \texttt{dynamics},
+\texttt{rk4\_step}. \\
+SAFE-on hidden input model &
+\eqref{eq:safe_loop} &
+\texttt{proprietary\_autopilot\_command}; estimator analogue in
+\texttt{casadi\_controller\_command}. \\
+Actuator lag/rate limits &
+\eqref{eq:Tact}--\eqref{eq:eact} &
+\texttt{actuator\_step}; constants checked against the current code. \\
+Mocap measurement and reconstruction &
+\eqref{eq:code_derivative_pipeline} &
+\texttt{mocap\_from\_state}, \texttt{derive\_state\_from\_mocap},
+\texttt{smooth\_trials}. \\
+Equation-error LS &
+\eqref{eq:code_inferred_coefficients}--\eqref{eq:code_equation_error} &
+\texttt{infer\_coefficients}, \texttt{fit\_equation\_error}. \\
+OEM-SS and mocap-output OEM &
+\eqref{eq:code_oem_ss}--\eqref{eq:code_oem_mocap} &
+\texttt{run\_oem\_casadi}, \texttt{run\_oem\_mocap\_output\_casadi}. \\
+Variational-Mocap &
+\eqref{eq:code_variational_mocap} &
+\texttt{run\_variational\_mocap\_output\_casadi}. \\
+OEM-HiddenController &
+\eqref{eq:code_oem_hidden} &
+\texttt{run\_oem\_hidden\_controller}. \\
+EKF-ParamID &
+\eqref{eq:code_ekf} &
+\texttt{make\_casadi\_rk4\_step\_parameter\_jacobian}, \texttt{run\_filter\_error\_ekf}. \\
+Linear and subspace models &
+\eqref{eq:code_linear_ss}--\eqref{eq:code_subspace} &
+\texttt{run\_linear\_state\_space}, \texttt{run\_subspace\_hankel}. \\
+Koopman-EDMD &
+\eqref{eq:code_koopman_edmd} &
+\texttt{fit\_koopman\_edmd}, \texttt{run\_koopman\_edmd}. \\
+Frequency-Welch &
+\eqref{eq:code_frequency} &
+\texttt{fit\_frequency\_linear\_model}, \texttt{run\_frequency\_linear}. \\
+SINDy and symbolic stepwise &
+\eqref{eq:code_sindy_library} &
+\texttt{sindy\_library}, \texttt{fit\_sindy}, \texttt{fit\_symbolic\_stepwise}. \\
+UDE, PINN closure, hidden-control neural rows &
+\eqref{eq:code_ude}--\eqref{eq:code_gp_closure} &
+\texttt{run\_ude}, \texttt{run\_pinn\_closure},
+\texttt{run\_gp\_coeff\_closure}, \texttt{infer\_input\_correction}, \texttt{run\_ude\_hidden\_control},
+\texttt{run\_pinn\_hidden\_control}. \\
+\bottomrule
+\end{longtable}
+
+\subsection*{Shared Benchmark Results}
+The benchmark is generated by a reproducible Python workflow that writes the
+method-comparison tables, diagnostic figures, and LaTeX-ready artifacts directly
+into the \texttt{latex} directory. The main text emphasizes graphics because the
+raw tables are too verbose to be the primary interpretation tool. The full
+sorted tables are retained in Appendix~\ref{app:benchmark_tables} for audit and
+reproduction. The validation score is a normalized aggregate trajectory error,
+so lower values indicate better agreement with the simulated truth. Training
+time and rollout time are reported separately because the computational burden
+differs across method families: CasADi/IPOPT methods spend most of their time in
+nonlinear programming, neural methods train quickly on the GPU but require
+repeated rollout evaluations, and linear or regression-based methods fit almost
+immediately but can be sensitive to measurement preprocessing.
+
+\begin{figure}[!htbp]
+    \centering
+    \includesvg[width=0.98\linewidth]{generated_benchmark_problem_matrix}
+    \caption{Benchmark interpretation axes. The paper evaluates both direct-state and motion-capture-style measurement assumptions, and it separately studies SAFE-off and SAFE-on hidden-input dynamics.}
+    \label{fig:benchmark_problem_matrix}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \includesvg[width=0.98\linewidth]{generated_method_score_heatmap}
+    \caption{Open-loop validation trajectory error by method and benchmark condition. Lower values are better. All ranked methods use validation measurements only for initialization and scoring, not for feedback during validation rollout.}
+    \label{fig:method_score_heatmap}
+\end{figure}
+
+For the direct-state case, the supervised coefficient surrogate gives the best score because it uses synthetic labels for the hidden aerodynamic residuals; it is therefore best interpreted as an upper-bound surrogate rather than a flight-data-only method. The UDE, PINN-style coefficient-closure, and GP/RBF coefficient-closure models test the flight-data-only version of the same idea: retain the rigid-body equations while learning missing force and moment closures from residuals. The Koopman-EDMD row tests a different surrogate role, namely a lifted one-step predictor with no aerodynamic parameter interpretation. The EKF-ParamID row uses filtering only during training; its validation score is a frozen-parameter open-loop rollout driven by the pilot command sequence.
+
+The mocap-derived comparison shows a different ranking. Methods that depend strongly on differentiated states, especially equation-error, SINDy, GP/RBF coefficient closure, PINN-style closure, UDE residual learning, and the compact Frequency-Welch baseline, degrade when reconstructed $V,\alpha,\gamma,q$ inherit numerical differentiation noise and smoothing lag from position and attitude. Open-loop grey-box and learned-residual models expose the cost of using reconstructed states as if they were direct aerodynamic measurements. This is precisely the practical issue motivating mocap-output OEM and latent-state filter or variational formulations.
+
+Tables~\ref{tab:open_loop_shared_method_comparison_direct} and
+\ref{tab:open_loop_safe_shared_method_comparison_direct} isolate the SAFE-off
+versus SAFE-on comparison for the same randomized open-loop pilot-command
+excitation. In the SAFE-off case, the main unobserved input effect is actuator
+lag between $\mathbf{u}_{\mathrm{cmd}}$ and $\mathbf{u}_{\mathrm{act}}$. In the
+SAFE-on case, the same observed pilot command is additionally passed through the
+hidden pitch-attitude/rate loop in \eqref{eq:safe_loop}. This comparison is the
+closest numerical analog to flying the off-the-shelf aircraft with the
+proprietary stabilizer disabled or enabled.
+
+\begin{figure}[!htbp]
+    \centering
+    \includesvg[width=0.98\linewidth,height=0.74\textheight,keepaspectratio]{generated_dataset_direct_validation_score_panels}
+    \caption{Direct-state open-loop validation score panels for the archived benchmark datasets. The SAFE-off and SAFE-on panels isolate how hidden command reshaping changes the ranking even before mocap reconstruction noise is introduced. Lower score is better.}
+    \label{fig:dataset_direct_validation_score_panels}
+\end{figure}
+\FloatBarrier
+
+Tables~\ref{tab:safe_loop_shared_method_comparison_direct} and
+\ref{tab:safe_loop_shared_method_comparison_mocap} show the SAFE-loop recovery
+probe comparison. This dataset is the most relevant to the off-the-shelf vehicle
+question because the estimator sees external pilot commands while the plant is
+driven by internally reshaped elevator commands. The hidden-controller OEM is
+included in this table, but it is intentionally marked as an oracle-structure
+case: it assumes that the analyst has guessed a parameterized SAFE-like pitch
+law. That assumption is optimistic. In real proprietary firmware, saturations,
+rate limits, and panic/recovery gates are difficult to identify unless the test
+data visit those regions, and their absence from ordinary lap data can make the
+controller appear as ordinary aerodynamic or actuator model error.
+
+Figure~\ref{fig:shared_train_time_accuracy_tradeoff} places the same results on a cost-error plot. The horizontal axis reports training or nonlinear-solve time, while the vertical axis reports the normalized validation trajectory error score; lower vertical position is better. This view separates methods that are statistically attractive but computationally expensive from methods that are fast but sensitive to noise or model mismatch. In the direct-state case, neural residual and coefficient-closure approaches achieve low error with short GPU training time, whereas CasADi/IPOPT OEM methods spend more time in nonlinear optimization. In the mocap-derived case, the dominant issue is no longer training cost but measurement preprocessing: several fast derivative-based methods become inaccurate because the reconstructed aerodynamic states are poor dependent variables.
+
+\begin{figure}[H]
+    \centering
+    \includesvg[width=0.98\linewidth]{generated_shared_train_time_accuracy_tradeoff}
+    \caption{Training-time versus validation-error tradeoff for each open-loop benchmark method. Marker area increases with validation rollout time. Lower vertical position means lower trajectory error and therefore better validation performance.}
+    \label{fig:shared_train_time_accuracy_tradeoff}
+\end{figure}
+
+Figure~\ref{fig:shared_validation_score_comparison} shows the same validation scores as a ranked log-scale score plot split by measurement assumption.
+
+\begin{figure}[!htbp]
+    \centering
+    \includesvg[width=0.98\linewidth]{generated_shared_validation_score_comparison}
+    \caption{Open-loop validation trajectory score for the shared 3-DoF longitudinal benchmark. Lower is better. Direct-state rows use simulated noisy $V,\alpha,\gamma,q$ measurements; mocap rows use states reconstructed from 100 Hz position and attitude measurements.}
+    \label{fig:shared_validation_score_comparison}
+\end{figure}
+
+The EKF-ParamID row should be interpreted as a training-time parameter
+estimator, not as a validation-time state estimator. The filter uses training
+measurements to update the augmented state and parameter covariance, then
+freezes the learned parameters for validation. This avoids the unfair
+comparison that would occur if validation measurements were assimilated at
+every time step. If a separate state-estimation diagnostic is desired, it
+should be reported separately from the open-loop model-identification rankings.
+
+\begin{figure}[!htbp]
+    \centering
+    \includesvg[width=0.98\linewidth]{generated_shared_validation_trajectory_overlay}
+    \caption{Representative validation trajectory overlay for the best-scoring methods from the shared benchmark. The plot highlights the difference between direct-state tracking and methods that are sensitive to derivative reconstruction and model-form error.}
+    \label{fig:shared_validation_trajectory_overlay}
+\end{figure}
+
+The observation-rate study in Fig.~\ref{fig:observation_rate_state_reconstruction} isolates the effect of lowering the motion-capture observation rate; the full numerical table is in Appendix~\ref{app:benchmark_tables}. The degradation in reconstructed state quality is modest when going from 100 Hz to 10 Hz for slow longitudinal content, but becomes much more severe at 2 Hz, where the Nyquist frequency is only 1 Hz. At that point the short-period and actuator-driven content needed for identification can be attenuated or aliased before any estimator sees the data.
+
+\begin{figure}[!htbp]
+    \centering
+    \includesvg[width=0.82\linewidth]{generated_observation_rate_state_reconstruction}
+    \caption{State-reconstruction error obtained by decimating the 100 Hz mocap stream to lower observation rates before smoothing and finite differencing.}
+    \label{fig:observation_rate_state_reconstruction}
+\end{figure}
+
+The Fisher-information diagnostics in Appendix~\ref{app:benchmark_tables} provide a local uncertainty view for the equation-error aerodynamic parameter fit. These values should not be interpreted as full Bayesian posterior intervals; they are local CRLB-style diagnostics around a fitted parameter vector under the assumed noise model. High parameter correlations indicate directions in the aerodynamic parameter space that are weakly separated by the available maneuver data, reinforcing the need for excitation design and uncertainty-aware validation.
+
+\begin{figure}[!htbp]
+    \centering
+    \includesvg[width=0.95\linewidth]{generated_shared_pinn_coeff_residual_validation}
+    \caption{PINN-style coefficient-closure residual comparison on a validation trajectory. This diagnostic tests whether the learned closure recovers the hidden nonlinear aerodynamic coefficient increments rather than merely matching states.}
+    \label{fig:shared_pinn_coeff_residual_validation}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \includesvg[width=0.95\linewidth]{generated_shared_frequency_validation_diagnostic}
+    \caption{Frequency-domain diagnostic from the validation maneuver. The coherence and frequency-response estimates are useful for checking excitation bandwidth, but ordinary maneuver data are not a substitute for a dedicated multisine or sine-sweep frequency-identification experiment.}
+    \label{fig:shared_frequency_validation_diagnostic}
+\end{figure}
+
+\FloatBarrier
+
+\section{Supplemental Output-Error Shooting Illustration}
+This supplemental illustration is retained to show the practical difference
+between single-shooting and multiple-shooting output-error estimation under
+poor initialization and actuator mismatch. It is not the primary benchmark
+comparison; the method-comparison results are those reported in the shared
+benchmark section above and in Appendix~\ref{app:benchmark_tables}.
+
+\subsection{Output Error Method}
+This formulation belongs to the class of prediction error methods (PEM), where the objective is to minimize the discrepancy between model-predicted outputs and measured data. The Output Error (OE) method is a special case that assumes deterministic system dynamics, with all uncertainty entering through measurement noise.
+
+Starting from the nonlinear system,
+\begin{align}
+\dot{x}(t) &= f\big(x(t),u(t);\theta_p\big),\\
+y(t) &= h\big(x(t);\theta_p\big) + v(t),
+\end{align}
+the predicted output $\hat{y}(t,\theta_p)$ is obtained by numerically integrating the state equations for a given parameter vector $\theta_p$ (see Section~\ref{sec:prob}).
+
+Assuming additive Gaussian measurement noise,
+\begin{align}
+y_k = \hat{y}_k(\theta_p) + \varepsilon_k, \qquad \varepsilon_k \sim \mathcal{N}(0, R),
+\end{align}
+the maximum likelihood estimation (MLE) problem becomes
+\begin{align}
+J_{\text{MLE}}(\theta_p, R) =
+\frac{1}{2} \sum_{k=1}^{N} 
+\left(y_k - \hat{y}_k(\theta_p)\right)^\top R^{-1} 
+\left(y_k - \hat{y}_k(\theta_p)\right)
++ \frac{N}{2} \log \det R.
+\end{align}
+In this work, $R$ is assumed diagonal and estimated jointly with $\theta_p$ via a log-parameterization, resulting in adaptive weighting across output channels.
+
+The resulting nonlinear program is constructed symbolically using CasADi and solved using IPOPT, with state trajectories generated through a fixed-step fourth-order Runge--Kutta (RK4) integrator embedded within the optimization.
+
+Two OE formulations are considered: single shooting (SS) and multiple shooting (MS).
+
+\subsubsection{Single--Shooting Formulation}
+
+In the single--shooting implementation, the full state trajectory is generated by
+integrating the nominal longitudinal model over the complete experiment horizon.
+The aerodynamic parameter vector, the initial state, and the measurement-noise
+standard deviations are estimated jointly. The decision vector is
+\[
+    w_{\mathrm{SS}}
+    =
+    \begin{bmatrix}
+        \boldsymbol{\theta}_p^\top &
+        \mathbf{x}_0^\top &
+        \log\boldsymbol{\sigma}^\top
+    \end{bmatrix}^{\!\top}.
+\]
+Starting from the optimized initial condition $\mathbf{x}_0$, the trajectory is
+propagated using a fixed-step fourth-order Runge--Kutta map,
+\[
+    \hat{\mathbf{x}}_{k+1}
+    =
+    \Phi(\hat{\mathbf{x}}_k,\mathbf{u}_k;\boldsymbol{\theta}_p,\Delta t),
+    \qquad k=0,\ldots,N-1.
+\]
+In the oracle state-measurement comparison, the predicted output is
+taken as $\hat{\mathbf{y}}_k=\hat{\mathbf{x}}_k$. In the motion-capture comparison,
+the same latent trajectory is instead passed through the measurement model
+\[
+\hat{\mathbf{y}}_{\mathrm{mocap},k}
+=h(\hat{\mathbf{x}}_k)
+=
+\begin{bmatrix}
+\hat{p}_{x,k} & \hat{p}_{z,k} & \hat{\alpha}_k+\hat{\gamma}_k
+\end{bmatrix}^{T},
+\]
+where $\hat{p}_x$ and $\hat{p}_z$ are obtained by integrating
+$\dot{p}_x=\hat{V}\cos\hat{\gamma}$ and
+$\dot{p}_z=\hat{V}\sin\hat{\gamma}$. This output-error formulation avoids
+using numerically differentiated mocap data as the dependent variable. The negative log-likelihood
+objective, assuming independent Gaussian noise in each channel, is
+\[
+    J_{\mathrm{SS}}
+    =
+    \sum_{j=1}^{4} N\log\sigma_j
+    +
+    \frac{1}{2}
+    \sum_{k=0}^{N-1}
+    \sum_{j=1}^{4}
+    \frac{\left(\hat{y}_{k,j}-y_{k,j}\right)^2}{\sigma_j^2}.
+\]
+Thus, the single--shooting OEM problem is
+\[
+    \min_{\boldsymbol{\theta}_p,\,\mathbf{x}_0,\,\log\boldsymbol{\sigma}}
+    J_{\mathrm{SS}}.
+\]
+While this formulation is compact, the entire predicted trajectory relies on a single integration from the initial state, rendering the optimization sensitive to parameter initialization and prone to error accumulation over long horizons. Consequently, the Equation Error Method is often employed as a precursor to provide a robust initial guess for the OEM. The single-shooting output error approach remains the current industry standard, implemented in widely used toolkits such as SIDPAC \cite{Morelli2002SIDPAC}.
+
+\subsection{Variational System Identification}
+Variational system identification occupies the space between deterministic OEM and filter-error methods. For a stochastic continuous-time model,
+\[
+d\mathbf{x}(t)=f(\mathbf{x}(t),\mathbf{u}(t);\theta_p)\,dt+G(\theta_p)\,dW(t),
+\qquad
+\mathbf{y}_k=h(\mathbf{x}_k,\mathbf{u}_k;\theta_p)+\mathbf{v}_k,
+\]
+the exact likelihood requires marginalizing over the latent state path $\mathbf{x}_{0:N}$. FEM approximates this marginalization using a Kalman-filter prediction model. Variational system identification instead introduces an assumed smoothing density $q(\mathbf{x}_{0:N})$ and maximizes an evidence lower bound,
+\[
+\mathcal{L}(\theta_p,q)
+=
+\mathbb{E}_{q}
+\left[
+\log p_{\theta_p}(\mathbf{x}_{0:N},\mathbf{y}_{0:N})
+-\log q(\mathbf{x}_{0:N})
+\right],
+\]
+over both the model parameters and the smoothing distribution. In Dutra's aircraft formulation \citep{dutra_variational_2025}, the assumed density is chosen to preserve a Markov structure so that the objective remains sparse and tractable. This makes VI a natural candidate for the mocap-output problem considered here: the measured outputs are $p_x,p_z,\theta$, the flight states are latent, and turbulence or unmodeled disturbances can be represented as process noise rather than being forced into measurement residuals.
+
+The role of VI in this paper is therefore different from SINDy, PINNs, or UDEs. VI improves inference for a prescribed grey-box model in the presence of process and measurement noise; it does not automatically supply a new aerodynamic closure. If the nominal coefficient structure is incomplete, VI can produce better state smoothing and uncertainty estimates, but the missing aerodynamic physics must still be represented through additional parameters, basis functions, Gaussian-process terms, or neural residuals. A natural extension of the present benchmark is therefore a variational UDE or variational coefficient-closure model, where VI handles latent-state and process-noise uncertainty while the residual model handles structural aerodynamic error.
+
+\subsubsection{Multiple--Shooting Formulation}
+
+In the multiple--shooting implementation \cite{bock1984multiple,jategaonkar2006flight}, the time horizon is divided into $M$
+shorter windows. The aerodynamic parameters and noise standard deviations remain
+global, while each window has its own optimized shooting-node state. The decision
+vector is
+\[
+    w_{\mathrm{MS}}
+    =
+    \begin{bmatrix}
+        \boldsymbol{\theta}_p^\top &
+        \mathbf{X}_0^\top &
+        \mathbf{X}_1^\top &
+        \cdots &
+        \mathbf{X}_{M-1}^\top &
+        \log\boldsymbol{\sigma}^\top
+    \end{bmatrix}^{\!\top}.
+\]
+Within the $i$th window, the local trajectory is initialized from $\mathbf{X}_i$
+and propagated as
+\[
+    \hat{\mathbf{x}}_{i,k+1}
+    =
+    \Phi(\hat{\mathbf{x}}_{i,k},\mathbf{u}_{i,k};
+    \boldsymbol{\theta}_p,\Delta t),
+    \qquad
+    \hat{\mathbf{x}}_{i,0}=\mathbf{X}_i.
+\]
+Continuity between neighboring windows is enforced through equality constraints,
+\[
+    \mathbf{g}_i
+    =
+    \hat{\mathbf{x}}_{i,\mathrm{end}}
+    -
+    \mathbf{X}_{i+1}
+    =
+    \mathbf{0},
+    \qquad i=0,\ldots,M-2.
+\]
+The corresponding MLE problem is
+\[
+\begin{aligned}
+    \min_{\boldsymbol{\theta}_p,\,\{\mathbf{X}_i\},\,\log\boldsymbol{\sigma}}
+    \quad
+    J_{\mathrm{MS}}
+    &=
+    \sum_{j=1}^{4} N\log\sigma_j
+    +
+    \frac{1}{2}
+    \sum_{i=0}^{M-1}
+    \sum_{k=0}^{N_i-1}
+    \sum_{j=1}^{4}
+    \frac{
+    \left(\hat{y}_{i,k,j}-y_{i,k,j}\right)^2
+    }{\sigma_j^2} \\
+    \text{s.t.}\quad
+    \mathbf{g}_i &= \mathbf{0},
+    \qquad i=0,\ldots,M-2.
+\end{aligned}
+\]
+This introduces additional decision variables but allows the optimizer to leverage intermediate state information, which significantly improves robustness and convergence behavior.
+\subsubsection{Results and Discussion}
+
+The performance of SS and MS formulations is evaluated for both test cases described in Section~\ref{subsec:testcase}. The resulting trajectory fits are shown in Fig.~\ref{fig:MS_SS}, and the corresponding parameter estimates are summarized in Table~\ref{tab:param_estimation_comparison}.
+
+It is important to note that single shooting can perform comparably to multiple shooting when provided with a good initial parameter guess and when the time horizon is short. In such cases, the optimization landscape remains well-conditioned and SS is able to converge to the correct solution. However, in this study, the initial guess is deliberately chosen to be moderately poor, which is more representative of practical system identification scenarios. Under these conditions, SS becomes highly sensitive to initialization, leading to significant deviations in both trajectory fit and parameter estimates.
+
+In contrast, MS demonstrates significantly improved robustness. By dividing the trajectory into shorter segments, MS prevents error accumulation during integration and allows the optimizer to correct state deviations at intermediate nodes. This is clearly reflected in Fig.~\ref{fig:MS_SS}, where MS (blue dash-dotted) closely follows the ground truth across all states, while SS (red dashed) exhibits noticeable deviations, particularly in $\alpha$ and $Q$, in both test cases.
+
+Despite these improvements, the MS parameter estimates are not perfectly aligned with the true values, and the error percentage significantly increased from test case 1 to 2 for all respective estimated parameters. This is a fundamental limitation of the OE formulation. In the presence of structural model mismatch, unmodeled effects such as actuator lag and gust disturbances are not explicitly represented in the model. Consequently, these discrepancies are absorbed into the residual term, and interpreted as measurement noise, leading to biased parameter estimates. This explains why, even with improved trajectory fits, the recovered parameters deviate from their true values in Table~\ref{tab:param_estimation_comparison}.\\
+
+\begin{figure}[hbt!]
+    \centering
+    \includesvg[width=1\linewidth]{oem_ss_mle_trajectories} % your SVG file name (without .svg)
+    \caption{Trajectory tracking performance of single-shooting (SS) and multiple-shooting (MS) output-error MLE estimators for longitudinal aircraft system identification with poor initial guess. Left column: Test Case 1 (near-ideal, noise-only). Right column: Test Case 2 (non-ideal, commanded-input lag/limit mismatch with unmodelled dynamics)}
+    \label{fig:MS_SS}
+\end{figure}
+
+
+\begin{table}[h!]
+\centering
+\caption{Parameter Estimation Results: Comparison of SS and MS}
+\label{tab:param_estimation_comparison}
+\begin{tabular}{lcc|cccc|cccc}
+\toprule
+ &  &  & \multicolumn{4}{c|}{\textbf{Test Case 1: Noise Only}} & \multicolumn{4}{c}{\textbf{Test Case 2: Lag/Limit Mismatch}} \\
+\cmidrule(lr){4-7} \cmidrule(lr){8-11}
+\textbf{Param} & \textbf{True} & \textbf{Initial Guess} 
+& \textbf{SS} & \textbf{Err[\%]} & \textbf{MS} & \textbf{Err[\%]}
+& \textbf{SS} & \textbf{Err[\%]} & \textbf{MS} & \textbf{Err[\%]} \\
+\midrule
+
+$C_{L_\alpha}$ & 3.000 & 4.800 
+& 4.697 & 56.559 & 3.132 & 4.410 
+& 4.791 & 59.690 & 3.463 & 15.418 \\
+
+$C_{L0}$ & 0.100 & -0.050 
+& -0.077 & 176.610 & 0.079 & 21.420 
+& -0.040 & 139.570 & 0.046 & 54.400 \\
+
+$k$ & 0.100 & 0.350 
+& 0.035 & 65.170 & 0.104 & 4.150 
+& 0.203 & 103.420 & 0.085 & 14.800 \\
+
+$C_{D0}$ & 0.030 & 0.080 
+& 0.041 & 37.100 & 0.030 & 0.033 
+& 0.019 & 37.567 & 0.031 & 3.433 \\
+
+$C_{M0}$ & 0.010 & 0.060 
+& -0.026 & 364.200 & 0.011 & 9.600 
+& -0.016 & 263.200 & 0.008 & 24.300 \\
+
+$C_{M_e}$ & 0.100 & 0.020 
+& 0.067 & 33.190 & 0.111 & 10.700 
+& 0.116 & 15.780 & 0.091 & 8.810 \\
+
+$C_{M_Q}$ & -0.100 & -0.350 
+& -0.218 & 117.580 & -0.116 & 15.630 
+& -0.287 & 187.330 & -0.107 & 7.430 \\
+
+$C_{M_\alpha}$ & -0.100 & 0.050 
+& 0.254 & 353.530 & -0.110 & 9.720 
+& 0.161 & 261.130 & -0.076 & 23.720 \\
+
+\bottomrule
+\end{tabular}
+\end{table}
+
+Overall, the results highlight that multiple shooting provides improved robustness to poor initialization and structural mismatch, while single shooting remains sensitive to both factors. However, both formulations inherit the fundamental limitation of the OE framework, where model inadequacy is masked as stochastic noise, ultimately affecting parameter accuracy.
+\subsection{SINDy and its Variations}
+Sparse Identification of Nonlinear Dynamics (SINDy) searches for governing
+equations by regressing measured state derivatives on a user-defined library of
+candidate nonlinear functions. For the longitudinal benchmark, the dependent
+variable for a fully black-box SINDy model would be the smoothed derivative matrix
+\[
+    \dot{X} =
+    \begin{bmatrix}
+    \dot{V} & \dot{\alpha} & \dot{\gamma} & \dot{Q}
+    \end{bmatrix},
+\]
+and the candidate library is evaluated on
+$[V,\alpha,\gamma,Q,T,\delta_e]$. The standard SINDy model is
+\begin{equation}
+    \dot{X} = \Theta(X,U)\,\Xi,
+    \label{eq:sindy_standard}
+\end{equation}
+where each column of $\Xi$ contains the active terms for one state equation. A
+LASSO-style sparse formulation can be written as
+\begin{equation}
+    \Xi^\star
+    =
+    \operatorname*{arg\,min}_{\Xi'}
+    \left\|
+    \Theta(X,U)\Xi' - \dot{X}
+    \right\|_F^2
+    +\lambda\|\Xi'\|_1 .
+    \label{eq:sindy_lasso}
+\end{equation}
+The implementation used for the benchmark follows the common sequential
+thresholded least-squares philosophy rather than a full convex LASSO solve, but
+applies it to aerodynamic coefficients rather than directly to
+\eqref{eq:sindy_standard}. The low-order aircraft terms are protected in the
+regression, while additional nonlinear terms are sparse. This lets SINDy learn
+the nominal-like coefficient parameters and the missing nonlinear aerodynamic
+terms in a single fit. The same library is also used by a forward stepwise
+symbolic-regression baseline, which remains a black-box derivative fit.
+
+For aircraft data, the practical details are as important as the sparse
+optimizer. Derivatives are obtained from smoothed direct-state or
+mocap-derived-state histories; the latter case is intentionally difficult
+because motion-capture position and attitude must be differentiated to recover
+airspeed, flight-path angle, angle of attack, and pitch rate. Hidden actuator
+or SAFE-loop dynamics are also challenging because the candidate library sees
+the external pilot command rather than the internal control signal. This is why
+the benchmark uses structured coefficient SINDy: the known rigid-body balance is
+built into the coefficient-inference step, low-order aircraft terms are retained
+as protected regressors, and sparse discovery is reserved for missing nonlinear
+aerodynamic terms.
+
+\subsection{Physics-Informed and Neural-Residual Methods}
+For the longitudinal benchmark considered here, a direct inverse PINN that penalizes deviations from the same fixed aerodynamic coefficient model used by OEM is not the most appropriate use of physics information. The purpose of the benchmark is to evaluate identification methods when unmodeled aerodynamic forces, moments, actuator effects, or disturbances are present. If the PINN physics residual forces the trajectory to satisfy an incomplete nominal force and moment model, the residual acts as a regularizer toward the wrong dynamics and can suppress the missing effects the method is supposed to discover.
+
+The useful distinction is between exact structure and aerodynamic closure assumptions. Kinematic identities and rigid-body balance laws should be enforced strongly or built into the parameterization. By contrast, aerodynamic force and moment functions should remain learnable because these are precisely the terms that may change outside the nominal model. A tractable PINN formulation for this paper therefore uses a neural trajectory $\widehat{\mathbf{x}}_\theta(t)$ and learned aerodynamic coefficient functions,
+\[
+\widehat{C}_{D,\phi}=\mathcal{N}_{D,\phi}(\widehat{\alpha},\widehat{q},\delta_e,\widehat{V}),\quad
+\widehat{C}_{L,\phi}=\mathcal{N}_{L,\phi}(\widehat{\alpha},\widehat{q},\delta_e,\widehat{V}),\quad
+\widehat{C}_{M,\phi}=\mathcal{N}_{M,\phi}(\widehat{\alpha},\widehat{q},\delta_e,\widehat{V}),
+\]
+rather than treating a low-order coefficient expansion as the true physics. The corresponding dimensional forces and moments are
+\[
+\widehat{D}=\bar{q}S\widehat{C}_{D,\phi},\qquad
+\widehat{L}=\bar{q}S\widehat{C}_{L,\phi},\qquad
+\widehat{M}=\bar{q}S\widehat{C}_{M,\phi},
+\]
+where $\bar{q}=\frac{1}{2}\rho \widehat{V}^2$. The differential-equation residual then enforces the longitudinal rigid-body equations,
+\[
+\begin{aligned}
+r_V &= \dot{\widehat{V}}
+ - \frac{1}{m}\left(-\widehat{D}+T\cos\widehat{\alpha}-mg\sin\widehat{\gamma}\right),\\
+r_\gamma &= \dot{\widehat{\gamma}}
+ - \frac{1}{m\widehat{V}}\left(\widehat{L}+T\sin\widehat{\alpha}-mg\cos\widehat{\gamma}\right),\\
+r_q &= \dot{\widehat{q}}-\frac{\widehat{M}}{J_y}.
+\end{aligned}
+\]
+The pitch kinematic relationship, such as $\dot{\alpha}=q-\dot{\gamma}$ for the standard longitudinal coordinates, is not an aerodynamic discovery target and should preferably be enforced by the state parameterization itself. If it is not hard-coded, it can be included as a high-weight residual, but this is a numerical convenience rather than a claim that the kinematics are uncertain physics.
+
+The resulting training objective is
+\[
+\mathcal{L}(\theta,\phi)=
+\frac{\lambda_{\mathrm{data}}}{N_y}\sum_i
+\left\|\mathbf{H}\widehat{\mathbf{x}}_\theta(t_i)-\mathbf{y}_i\right\|_2^2
++\frac{\lambda_{\mathrm{dyn}}}{N_f}\sum_j
+\left\|\mathbf{r}_{\mathrm{dyn}}(t_j)\right\|_2^2
++\lambda_{\mathrm{reg}}\mathcal{R}_{\mathrm{aero}}(\phi),
+\]
+where $\mathbf{r}_{\mathrm{dyn}}=[r_V,r_\gamma,r_q]^T$. The regularization term can encode weak aerodynamic priors such as smoothness, dynamic-pressure scaling, drag positivity, boundedness, and local derivative signs near trim. These priors are much weaker than enforcing a complete aerodynamic model and are therefore more consistent with the goal of identifying unmodeled force and moment behavior.
+
+This setup places the present benchmark in the same family as the Non-Determinant and Modified Non-Determinant PINNs of Michek et al.~\citep{michek2026flight}, but at a deliberately smaller scale. Their work learns aerodynamic coefficients for a nonlinear 6-DOF simulation using many randomized flight intervals. Here, the same conceptual role is isolated in a 3-DOF longitudinal problem with known nominal coefficients and hidden nonlinear residual terms, making it possible to compare PINN-style closure learning directly against OEM, SINDy, and UDE residual models.
+
+A UDE formulation uses the same logic but augments a nominal coefficient model with learned residuals,
+\[
+\begin{aligned}
+C_D &= C_{D,\mathrm{nom}}(x,u;\theta_p)+\Delta C_{D,\phi}(x,u),\\
+C_L &= C_{L,\mathrm{nom}}(x,u;\theta_p)+\Delta C_{L,\phi}(x,u),\\
+C_M &= C_{M,\mathrm{nom}}(x,u;\theta_p)+\Delta C_{M,\phi}(x,u).
+\end{aligned}
+\]
+This is especially plausible for the present scope because the known model is used where it is trusted, while the neural residual captures model-form error. The identified parameters $\theta_p$ remain interpretable, and the residual terms provide a direct diagnostic for where the nominal aerodynamic model is inadequate.
+
+This formulation is intentionally not a full aerodynamic PINN in the Navier-Stokes sense. Without geometry, flow-field states, boundary conditions, and a high-fidelity solver or data set, enforcing the Euler, RANS, or Navier-Stokes equations is not tractable in this paper. The PINN comparison is therefore limited to flight-dynamics-level grey-box learning, while high-fidelity CFD-constrained surrogate modeling is treated as future work.
+
+
+
+
+\section{Conclusions}
+The benchmark is designed to support method selection rather than identify a
+single universally best algorithm. When direct measurements of
+$V,\alpha,\gamma,Q$ are available and the primary mismatch is unknown
+aerodynamics, coefficient-closure and residual-learning methods are attractive
+because they preserve the rigid-body equations while learning the missing force
+and moment terms. The supervised coefficient surrogate is the best possible
+version of this idea in the synthetic benchmark, but it uses labels that real
+flight tests do not provide; it should therefore be interpreted as an upper
+bound. Flight-data-only UDE and PINN-style closure methods are more realistic
+choices in this regime.
+
+When only motion capture is available, the main difficulty changes. Algorithms
+that require accurate state derivatives suffer from finite-difference noise,
+smoothing lag, and loss of bandwidth. For this reason, mocap-output OEM and
+variational or smoothing formulations are better
+matched to the open-loop model-identification problem than methods that first reconstruct
+$V,\alpha,\gamma,Q$ and then differentiate them. The direct-state benchmark is
+still useful, but it should be read as an algorithm diagnostic, not as the
+expected performance for the PURT pylon-racing measurement setup.
+
+When SAFE is enabled, the estimator observes the external pilot command while
+the plant responds to an internally reshaped elevator command. In this setting,
+a purely aerodynamic residual model can fit trajectories while misattributing
+hidden control action to aerodynamic effects. A hidden-input UDE or a
+parameterized hidden-controller OEM is more conceptually appropriate. The OEM
+hidden-controller row is deliberately optimistic because it assumes the analyst
+has guessed the controller structure. Real proprietary controllers may contain
+mode switches, saturations, rate limits, and recovery gates that are only
+identifiable if the flight test excites those regions. Therefore, ordinary lap
+data may be sufficient to learn a local predictive model but insufficient to
+reverse-engineer the controller.
+
+For frequency-domain identification, dedicated excitation matters. The compact
+Frequency-Welch baseline is useful for checking bandwidth and coherence, but it
+is not a substitute for a purpose-built CIFER-style campaign with carefully
+designed multisines, sweeps, input separation, and coherence validation. The
+sine-sweep datasets are included to make this distinction explicit.
+
+The practical recommendation is therefore problem dependent. Use mocap-output
+OEM or variational/filter-error methods when the measurement system is the
+dominant limitation. Use UDE or PINN-style coefficient closures when the
+measurement states are reliable but the aerodynamic model is incomplete. Use
+GP/RBF coefficient closures when a kernel surrogate with smoother interpolation
+and an eventual path to posterior uncertainty is preferred over a neural
+closure. Use Koopman-EDMD, subspace, or other lifted/input-output surrogates
+when predictive accuracy over the tested envelope is more important than
+recovering aerodynamic parameters. Use
+hidden-input models when a proprietary autopilot reshapes commands. Use
+frequency-domain tools when the experiment has been designed for spectral
+identification. The value of the benchmark is that each method is exposed to
+the same train/validation splits across these regimes, so these recommendations
+can be revised quantitatively as additional methods and datasets are added.
+
+\section{Future Work}
+Traditional neural networks, being fully black-box models, lack physical meaning and are therefore difficult to certify for safety-critical flight applications. Recent advances in sparse, kernel, lifted-linear, and physics-constrained learning can help overcome this limitation. Integrating interpretable nonlinear system identification frameworks, such as Sparse Identification of Nonlinear Dynamics (SINDy), symbolic regression, GP/Kriging coefficient closures, Koopman-EDMD, flight-dynamics-level PINNs, and UDE residual models with control design represents an important future research direction. These approaches can uncover latent dynamics and nonlinear dependencies that are not captured by classical parametric structures.
+
+The benchmark still does not fully represent every mature nonlinear system-identification family. In particular, a dedicated NARX/NARMAX, Volterra, and Hammerstein-Wiener comparison would be useful for the input-output prediction problem, especially when only motion-capture outputs and pilot commands are trusted. Those methods are adjacent to the subspace and Koopman rows included here, but they require a separate lag/order/structure-selection study to be fair.
+
+A separate high-fidelity path is possible when detailed geometry, flow-field data, and CFD solvers are available. In that setting, PINNs or neural operators could be used to build aerodynamic surrogate models constrained by the Euler, RANS, or Navier-Stokes equations together with boundary and far-field conditions. The surrogate could then provide force and moment closures for a 3-DoF or 6-DoF flight-dynamics model. This route is closer to CFD-based surrogate modeling than to classical flight-test system identification, so it is outside the scope of the present comparison but is an important direction for unsteady and strongly nonlinear aerodynamic regimes.
+
+% Furthermore, studying how uncertainty quantification from these methods propagates into control constraints may enable certifiable, learning-augmented control architectures.
+Another important extension is the development of uncertainty-aware system identification methods. Future work will investigate Bayesian formulations to characterize parameter uncertainty and its propagation through system dynamics. Such approaches can enable uncertainty-informed control and safety analysis, which are critical for deployment in safety-critical aerospace applications.
+
+% Another important extension is the evaluation of next-generation SysID techniques under off-nominal aerodynamic conditions such as icing, control-surface failures, or structural degradation. Classical linear techniques often struggle in such regimes, whereas hybrid symbolic ML models may adaptively infer changes in aerodynamic behavior. Developing standardized open-source datasets and benchmarking frameworks for these off-nominal identification scenarios would be a valuable contribution to the field.
+
+\appendix
+\section{Benchmark Result Tables}
+\label{app:benchmark_tables}
+The main text uses figures to summarize trends. The following tables retain the
+complete sorted numerical results used to generate those figures. Direct-state
+tables use simulated noisy $V,\alpha,\gamma,Q$ measurements. Mocap-derived
+tables use states reconstructed from 100 Hz position and pitch-attitude
+measurements. Lower validation score is better.
+
+\IfFileExists{generated/shared_method_comparison_direct_table.tex}{%
+\input{generated/shared_method_comparison_direct_table}
+}{}
+\IfFileExists{generated/shared_method_comparison_mocap_table.tex}{%
+\input{generated/shared_method_comparison_mocap_table}
+}{}
+
+\subsection{SAFE-Off and SAFE-On Open-Loop Cases}
+\IfFileExists{generated/open_loop_shared_method_comparison_direct_table.tex}{%
+\input{generated/open_loop_shared_method_comparison_direct_table}
+}{}
+\IfFileExists{generated/open_loop_shared_method_comparison_mocap_table.tex}{%
+\input{generated/open_loop_shared_method_comparison_mocap_table}
+}{}
+\IfFileExists{generated/open_loop_safe_shared_method_comparison_direct_table.tex}{%
+\input{generated/open_loop_safe_shared_method_comparison_direct_table}
+}{}
+\IfFileExists{generated/open_loop_safe_shared_method_comparison_mocap_table.tex}{%
+\input{generated/open_loop_safe_shared_method_comparison_mocap_table}
+}{}
+
+\subsection{SAFE Recovery-Probe Case}
+\IfFileExists{generated/safe_loop_shared_method_comparison_direct_table.tex}{%
+\input{generated/safe_loop_shared_method_comparison_direct_table}
+}{}
+\IfFileExists{generated/safe_loop_shared_method_comparison_mocap_table.tex}{%
+\input{generated/safe_loop_shared_method_comparison_mocap_table}
+}{}
+
+\subsection{Frequency-Excitation Cases}
+\IfFileExists{generated/sine_sweep_shared_method_comparison_direct_table.tex}{%
+\input{generated/sine_sweep_shared_method_comparison_direct_table}
+}{}
+\IfFileExists{generated/sine_sweep_shared_method_comparison_mocap_table.tex}{%
+\input{generated/sine_sweep_shared_method_comparison_mocap_table}
+}{}
+\IfFileExists{generated/sine_sweep_safe_shared_method_comparison_direct_table.tex}{%
+\input{generated/sine_sweep_safe_shared_method_comparison_direct_table}
+}{}
+\IfFileExists{generated/sine_sweep_safe_shared_method_comparison_mocap_table.tex}{%
+\input{generated/sine_sweep_safe_shared_method_comparison_mocap_table}
+}{}
+
+\section{Observation-Rate and UQ Tables}
+\IfFileExists{generated/observation_rate_table.tex}{%
+\input{generated/observation_rate_table}
+}{}
+\IfFileExists{generated/shared_uq_diagnostics_table.tex}{%
+\input{generated/shared_uq_diagnostics_table}
+}{}
+
+\section*{Acknowledgments}
+The authors acknowledge the use of AI for assisting in the efficient summarization of research papers used in the literature review and for the purpose of improving grammatical clarity of existing writing. All outputs were verified by the authors to ensure accuracy.
+% An Acknowledgments section, if used, \textbf{immediately precedes} the References. Individuals other than the authors who contributed to the underlying research may be acknowledged in this section. The use of special facilities and other resources also may be acknowledged. Sponsorship information and funding data are included here. The preferred spelling of the word “acknowledgment” in American English is without the “e” after the “g.” Avoid expressions such as “One of us (S.B.A.) would like to thank. . . ” Instead, write “F. A. Author thanks. . . ”.  If AI is used in the writing process or figure construction as permitted, authors must include a brief description of AI use in the Acknowledgments section of the manuscript.
+
+\bibliography{ref}
+
+
+\end{document}
