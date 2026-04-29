@@ -49,6 +49,9 @@ class MethodResult:
     train_samples: int
     notes: str
     train_loss_final: float = np.nan
+    train_cpu_s: float = np.nan
+    train_gpu_s: float = np.nan
+    gpu_memory_mb: float = np.nan
     backend: str = "numpy"
     implementation_status: str = "implemented"
     evaluation_mode: str = "open_loop"
@@ -95,6 +98,24 @@ def dynamics_from_coefficients(x: np.ndarray, u: np.ndarray, coeff: np.ndarray, 
     q_dot = moment / aircraft.jy
     alpha_dot = q_rate - gamma_dot
     return np.array([v_dot, alpha_dot, gamma_dot, q_dot])
+
+
+def casadi_dynamics_from_coefficients(x, u: np.ndarray, coeff, aircraft: Aircraft):
+    v = ca.fmax(x[0], 3.0)
+    alpha = x[1]
+    gamma = x[2]
+    thrust = u[0]
+    qbar = 0.5 * aircraft.rho * v**2
+    lift = coeff[0] * qbar * aircraft.wing_area
+    drag = coeff[1] * qbar * aircraft.wing_area
+    moment = coeff[2] * qbar * aircraft.wing_area
+    v_dot = (-drag + thrust * ca.cos(alpha) - aircraft.mass * aircraft.gravity * ca.sin(gamma)) / aircraft.mass
+    gamma_dot = (lift + thrust * ca.sin(alpha) - aircraft.mass * aircraft.gravity * ca.cos(gamma)) / (
+        aircraft.mass * v
+    )
+    q_dot = moment / aircraft.jy
+    alpha_dot = x[3] - gamma_dot
+    return ca.vertcat(v_dot, alpha_dot, gamma_dot, q_dot)
 
 
 def theta_dynamics(x: np.ndarray, u: np.ndarray, theta: np.ndarray, aircraft: Aircraft) -> np.ndarray:
@@ -488,6 +509,116 @@ def fit_sindy(xu: np.ndarray, target: np.ndarray, threshold: float, ridge: float
     return coeffs, names, float(np.mean(losses))
 
 
+def structured_sindy_coefficients_np(x: np.ndarray, u: np.ndarray, coeffs: list[np.ndarray]) -> np.ndarray:
+    blocks = structured_sindy_feature_blocks(np.concatenate((x, u))[None, :])
+    return np.array([blocks[idx][0] @ coeffs[idx] for idx in range(3)]).ravel()
+
+
+def structured_sindy_coefficients_casadi(x, u, coeffs: list) -> ca.MX:
+    v = x[0]
+    alpha = x[1]
+    gamma = x[2]
+    q_rate = x[3]
+    thrust = u[0]
+    elevator = u[1]
+    cl_features = ca.vertcat(
+        1,
+        alpha,
+        v,
+        gamma,
+        q_rate,
+        thrust,
+        elevator,
+        v * alpha,
+        v * gamma,
+        alpha * q_rate,
+        q_rate * elevator,
+        thrust * alpha,
+        alpha**2,
+        gamma**2,
+        q_rate**2,
+        elevator**2,
+        ca.sin(gamma),
+        ca.cos(alpha),
+        ca.cos(gamma),
+    )
+    cd_features = ca.vertcat(
+        1,
+        alpha,
+        alpha**2,
+        v,
+        gamma,
+        q_rate,
+        thrust,
+        elevator,
+        v * alpha,
+        v * gamma,
+        alpha * q_rate,
+        q_rate * elevator,
+        thrust * alpha,
+        gamma**2,
+        q_rate**2,
+        elevator**2,
+        ca.sin(gamma),
+        ca.cos(alpha),
+        ca.cos(gamma),
+    )
+    cm_features = ca.vertcat(
+        1,
+        alpha,
+        q_rate,
+        elevator,
+        v,
+        gamma,
+        v * alpha,
+        v * gamma,
+        alpha * q_rate,
+        q_rate * elevator,
+        thrust * alpha,
+        alpha**2,
+        gamma**2,
+        q_rate**2,
+        elevator**2,
+        ca.sin(gamma),
+        ca.cos(alpha),
+        ca.cos(gamma),
+    )
+    return ca.vertcat(ca.dot(cl_features, coeffs[0]), ca.dot(cd_features, coeffs[1]), ca.dot(cm_features, coeffs[2]))
+
+
+def casadi_integrated_sindy_rk4_step(
+    x,
+    u0: np.ndarray,
+    u1: np.ndarray,
+    coeffs: list,
+    aircraft: Aircraft,
+    dt: float,
+    coeff_lower: np.ndarray,
+    coeff_upper: np.ndarray,
+):
+    def rhs(x_local, u_local):
+        coeff = structured_sindy_coefficients_casadi(x_local, u_local, coeffs)
+        coeff = ca.vertcat(
+            ca.fmin(ca.fmax(coeff[0], coeff_lower[0]), coeff_upper[0]),
+            ca.fmin(ca.fmax(coeff[1], coeff_lower[1]), coeff_upper[1]),
+            ca.fmin(ca.fmax(coeff[2], coeff_lower[2]), coeff_upper[2]),
+        )
+        return casadi_dynamics_from_coefficients(x_local, u_local, coeff, aircraft)
+
+    umid = 0.5 * (u0 + u1)
+    k1 = rhs(x, u0)
+    k2 = rhs(x + 0.5 * dt * k1, umid)
+    k3 = rhs(x + 0.5 * dt * k2, umid)
+    k4 = rhs(x + dt * k3, u1)
+    x_next = x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+    return ca.vertcat(
+        ca.fmin(ca.fmax(x_next[0], 3.0), 35.0),
+        ca.fmin(ca.fmax(x_next[1], -0.8), 0.8),
+        ca.fmin(ca.fmax(x_next[2], -0.8), 0.8),
+        ca.fmin(ca.fmax(x_next[3], -4.0), 4.0),
+    )
+
+
 def fit_koopman_edmd(
     train_x: np.ndarray,
     train_u: np.ndarray,
@@ -662,7 +793,7 @@ def train_mlp(
     args: argparse.Namespace,
     device: torch.device,
     out_dim: int,
-) -> tuple[MLP, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[tuple[int, float]], float]:
+) -> tuple[MLP, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[tuple[int, float]], float, float, float, float]:
     y_lower = np.quantile(target, 0.002, axis=0)
     y_upper = np.quantile(target, 0.998, axis=0)
     target = np.clip(target, y_lower, y_upper)
@@ -677,7 +808,17 @@ def train_mlp(
     net = MLP(6, out_dim, args.width, args.depth).to(device)
     optimizer = torch.optim.Adam(net.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     history: list[tuple[int, float]] = []
+    if device.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device)
+        torch.cuda.synchronize(device)
+        gpu_start = torch.cuda.Event(enable_timing=True)
+        gpu_end = torch.cuda.Event(enable_timing=True)
+        gpu_start.record()
+    else:
+        gpu_start = None
+        gpu_end = None
     start = time.perf_counter()
+    start_cpu = time.process_time()
     for epoch in range(args.epochs):
         optimizer.zero_grad(set_to_none=True)
         pred = net(x_t)
@@ -686,8 +827,17 @@ def train_mlp(
         optimizer.step()
         if epoch % max(args.log_every, 1) == 0 or epoch == args.epochs - 1:
             history.append((epoch, float(loss.detach().cpu())))
+    if device.type == "cuda" and gpu_start is not None:
+        gpu_end.record()
+        torch.cuda.synchronize(device)
+        gpu_elapsed = float(gpu_start.elapsed_time(gpu_end) / 1000.0)
+        gpu_memory_mb = float(torch.cuda.max_memory_allocated(device) / (1024.0**2))
+    else:
+        gpu_elapsed = np.nan
+        gpu_memory_mb = np.nan
     elapsed = time.perf_counter() - start
-    return net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed
+    cpu_elapsed = time.process_time() - start_cpu
+    return net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed, cpu_elapsed, gpu_elapsed, gpu_memory_mb
 
 
 def make_mlp_predictor(
@@ -1267,6 +1417,103 @@ def run_sindy(xu: np.ndarray, dxdt: np.ndarray, validation: SplitData, args: arg
     return result, csv_names, csv_coeff
 
 
+def run_integrated_sindy(train: SplitData, xu: np.ndarray, dxdt: np.ndarray, validation: SplitData, args: argparse.Namespace) -> MethodResult:
+    start_wall = time.perf_counter()
+    start_cpu = time.process_time()
+    aircraft = Aircraft()
+    coeff_inferred = infer_coefficients(xu[:, :4], xu[:, 4:], dxdt, aircraft)
+    coeff_lower = np.quantile(coeff_inferred, 0.002, axis=0)
+    coeff_upper = np.quantile(coeff_inferred, 0.998, axis=0)
+    target = np.clip(coeff_inferred, coeff_lower, coeff_upper)
+    initial_coeffs, _names_by_output, initial_mse = fit_sindy(xu, target, args.sindy_threshold, args.sindy_ridge)
+    block_specs = structured_sindy_feature_blocks(xu[:1])
+    coefficient_sizes = [len(coeff) for coeff in initial_coeffs]
+    protected_masks = [spec[2] for spec in block_specs]
+    trial_count = min(args.max_integrated_sindy_trials, train.n_trials)
+    trial_ids = np.linspace(0, train.n_trials - 1, trial_count, dtype=int)
+    stride = max(1, int(args.integrated_sindy_stride))
+    t_fit = train.t[::stride]
+    noise = np.array([0.08, 0.0035, 0.0035, 0.012])
+    state_lower = np.array([5.0, -0.5, -0.45, -2.0])
+    state_upper = np.array([30.0, 0.5, 0.45, 2.0])
+
+    coeff_symbols = [ca.MX.sym(f"sindy_c_{idx}", size) for idx, size in enumerate(coefficient_sizes)]
+    x0_nodes = ca.MX.sym("x0_integrated_sindy", 4, trial_count)
+    variables = [*coeff_symbols, ca.reshape(x0_nodes, 4 * trial_count, 1)]
+    residuals = []
+    for local_idx, trial in enumerate(trial_ids):
+        x = x0_nodes[:, local_idx]
+        u = train.u_act[trial, ::stride]
+        y = train.y_meas[trial, ::stride]
+        for k in range(len(t_fit)):
+            for state_idx in range(4):
+                residuals.append((x[state_idx] - y[k, state_idx]) / noise[state_idx])
+            if k == len(t_fit) - 1:
+                continue
+            dt = float(t_fit[k + 1] - t_fit[k])
+            x = casadi_integrated_sindy_rk4_step(x, u[k], u[k + 1], coeff_symbols, aircraft, dt, coeff_lower, coeff_upper)
+
+    sparsity_penalty = ca.MX(0.0)
+    for coeff_symbol, protected in zip(coeff_symbols, protected_masks):
+        for idx, is_protected in enumerate(protected):
+            if not bool(is_protected):
+                sparsity_penalty += ca.sqrt(coeff_symbol[idx] ** 2 + 1e-8)
+
+    z = ca.vertcat(*variables)
+    objective = ca.sumsqr(ca.vertcat(*residuals)) + args.integrated_sindy_l1 * sparsity_penalty
+    solver = ca.nlpsol(
+        "integrated_sindy",
+        "ipopt",
+        {"x": z, "f": objective},
+        {
+            "ipopt.print_level": 0,
+            "ipopt.max_iter": args.max_integrated_sindy_nfev,
+            "ipopt.tol": 1e-5,
+            "print_time": False,
+        },
+    )
+    x0_guess = np.vstack([train.y_meas[trial, 0] for trial in trial_ids])
+    coefficient_guess = np.concatenate(initial_coeffs)
+    z0 = np.concatenate((coefficient_guess, np.clip(x0_guess, state_lower, state_upper).ravel(order="F")))
+    variable_coeff_lower = np.full_like(coefficient_guess, -20.0)
+    variable_coeff_upper = np.full_like(coefficient_guess, 20.0)
+    lower = np.concatenate((variable_coeff_lower, np.tile(state_lower, trial_count)))
+    upper = np.concatenate((variable_coeff_upper, np.tile(state_upper, trial_count)))
+
+    solution = solver(x0=np.clip(z0, lower, upper), lbx=lower, ubx=upper)
+    elapsed = time.perf_counter() - start_wall
+    cpu_elapsed = time.process_time() - start_cpu
+    z_hat = np.asarray(solution["x"]).ravel()
+    offset = 0
+    fitted_coeffs: list[np.ndarray] = []
+    for size in coefficient_sizes:
+        fitted_coeffs.append(z_hat[offset : offset + size])
+        offset += size
+
+    def coefficient_fn(x: np.ndarray, u: np.ndarray) -> np.ndarray:
+        coeff = structured_sindy_coefficients_np(x, u, fitted_coeffs)
+        return np.clip(coeff, coeff_lower, coeff_upper)
+
+    result = evaluate_method(
+        "Integrated-SINDy",
+        "Integrated output-error fit of the structured sparse aerodynamic coefficient library.",
+        elapsed,
+        int(trial_count * len(t_fit)),
+        int(sum(coefficient_sizes) + 4 * trial_count),
+        validation,
+        lambda _trial: lambda x, u: dynamics_from_coefficients(x, u, coefficient_fn(x, u), aircraft),
+        None,
+        (
+            f"CasADi/IPOPT trajectory-error fit over {trial_count} trials at stride {stride}; "
+            "uses the same protected aircraft terms and residual library as SINDy, but optimizes integrated rollout error rather than EOM-inferred coefficients."
+        ),
+    )
+    result.backend = "CasADi/IPOPT"
+    result.train_loss_final = float(solution["f"]) if "f" in solution else initial_mse
+    result.train_cpu_s = cpu_elapsed
+    return result
+
+
 def fit_symbolic_stepwise(xu: np.ndarray, dxdt: np.ndarray, max_terms: int, penalty: float, ridge: float) -> tuple[np.ndarray, list[str]]:
     theta_raw, names = sindy_library(xu)
     mean = theta_raw.mean(axis=0)
@@ -1569,7 +1816,7 @@ def run_ude(xu: np.ndarray, dxdt: np.ndarray, validation: SplitData, args: argpa
     theta = nominal_theta()
     nominal = np.vstack([theta_dynamics(x, u, theta, aircraft) for x, u in zip(xu[:, :4], xu[:, 4:])])
     target = dxdt - nominal
-    net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed = train_mlp(xu, target, args, device, 4)
+    net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed, cpu_elapsed, gpu_elapsed, gpu_memory_mb = train_mlp(xu, target, args, device, 4)
     residual_fn = make_mlp_predictor(net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, device)
     result = evaluate_method(
         "UDE-Residual",
@@ -1584,6 +1831,9 @@ def run_ude(xu: np.ndarray, dxdt: np.ndarray, validation: SplitData, args: argpa
     )
     result.backend = f"PyTorch/{device}"
     result.train_loss_final = history[-1][1] if history else np.nan
+    result.train_cpu_s = cpu_elapsed
+    result.train_gpu_s = gpu_elapsed
+    result.gpu_memory_mb = gpu_memory_mb
     return result, history
 
 
@@ -1593,7 +1843,7 @@ def run_pinn_closure(xu: np.ndarray, dxdt: np.ndarray, validation: SplitData, ar
     coeff_inferred = infer_coefficients(xu[:, :4], xu[:, 4:], dxdt, aircraft)
     coeff_nominal = np.vstack([theta_coefficients(x, u, theta) for x, u in zip(xu[:, :4], xu[:, 4:])])
     target = coeff_inferred - coeff_nominal
-    net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed = train_mlp(xu, target, args, device, 3)
+    net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed, cpu_elapsed, gpu_elapsed, gpu_memory_mb = train_mlp(xu, target, args, device, 3)
     coeff_residual_fn = make_mlp_predictor(net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, device)
     result = evaluate_method(
         "PINN-CoeffClosure",
@@ -1614,6 +1864,9 @@ def run_pinn_closure(xu: np.ndarray, dxdt: np.ndarray, validation: SplitData, ar
     )
     result.backend = f"PyTorch/{device}"
     result.train_loss_final = history[-1][1] if history else np.nan
+    result.train_cpu_s = cpu_elapsed
+    result.train_gpu_s = gpu_elapsed
+    result.gpu_memory_mb = gpu_memory_mb
     return result, history
 
 
@@ -1627,7 +1880,7 @@ def run_ude_hidden_control(
     aircraft = Aircraft()
     theta = nominal_theta()
     target = infer_input_correction(xu, dxdt, theta, aircraft)
-    net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed = train_mlp(xu, target, args, device, 2)
+    net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed, cpu_elapsed, gpu_elapsed, gpu_memory_mb = train_mlp(xu, target, args, device, 2)
     correction_fn = make_mlp_predictor(net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, device)
     result = evaluate_method(
         "UDE-HiddenControl",
@@ -1642,6 +1895,9 @@ def run_ude_hidden_control(
     )
     result.backend = f"PyTorch/{device}"
     result.train_loss_final = history[-1][1] if history else np.nan
+    result.train_cpu_s = cpu_elapsed
+    result.train_gpu_s = gpu_elapsed
+    result.gpu_memory_mb = gpu_memory_mb
     return result, history
 
 
@@ -1659,7 +1915,7 @@ def run_pinn_hidden_control(
     # version constrains throttle correction to zero and learns only elevator
     # reshaping from the pitch-moment residual.
     elevator_target = target[:, 1:2]
-    net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed = train_mlp(
+    net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed, cpu_elapsed, gpu_elapsed, gpu_memory_mb = train_mlp(
         xu,
         elevator_target,
         args,
@@ -1684,6 +1940,9 @@ def run_pinn_hidden_control(
     )
     result.backend = f"PyTorch/{device}"
     result.train_loss_final = history[-1][1] if history else np.nan
+    result.train_cpu_s = cpu_elapsed
+    result.train_gpu_s = gpu_elapsed
+    result.gpu_memory_mb = gpu_memory_mb
     return result, history
 
 
@@ -1696,7 +1955,7 @@ def run_supervised_coeff_surrogate(
 ) -> tuple[MethodResult, list[tuple[int, float]]]:
     aircraft = Aircraft()
     theta = nominal_theta()
-    net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed = train_mlp(
+    net, x_mean, x_scale, y_mean, y_scale, y_lower, y_upper, history, elapsed, cpu_elapsed, gpu_elapsed, gpu_memory_mb = train_mlp(
         xu,
         coeff_residual,
         args,
@@ -1717,6 +1976,9 @@ def run_supervised_coeff_surrogate(
     )
     result.backend = f"PyTorch/{device}"
     result.train_loss_final = history[-1][1] if history else np.nan
+    result.train_cpu_s = cpu_elapsed
+    result.train_gpu_s = gpu_elapsed
+    result.gpu_memory_mb = gpu_memory_mb
     return result, history
 
 
@@ -1733,6 +1995,9 @@ def summarize_results(results: list[MethodResult], validation: SplitData) -> lis
             "backend": result.backend,
             "validation_score": score,
             "train_elapsed_s": result.train_elapsed_s,
+            "train_cpu_s": result.train_cpu_s,
+            "train_gpu_s": result.train_gpu_s,
+            "gpu_memory_mb": result.gpu_memory_mb,
             "rollout_elapsed_s": result.rollout_elapsed_s,
             "total_elapsed_s": result.train_elapsed_s + result.rollout_elapsed_s,
             "train_loss_final": result.train_loss_final,
@@ -2021,6 +2286,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vi-position-process-noise", type=float, default=0.02)
     parser.add_argument("--sindy-threshold", type=float, default=0.04)
     parser.add_argument("--sindy-ridge", type=float, default=1e-6)
+    parser.add_argument("--max-integrated-sindy-trials", type=int, default=2)
+    parser.add_argument("--integrated-sindy-stride", type=int, default=20)
+    parser.add_argument("--max-integrated-sindy-nfev", type=int, default=35)
+    parser.add_argument("--integrated-sindy-l1", type=float, default=1e-3)
     parser.add_argument("--symbolic-max-terms", type=int, default=5)
     parser.add_argument("--symbolic-penalty", type=float, default=1.0)
     parser.add_argument("--symbolic-ridge", type=float, default=1e-6)
@@ -2057,11 +2326,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-every", type=int, default=25)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--nperseg", type=int, default=512)
+    parser.add_argument("--fig-dir", type=Path, default=FIG_DIR)
+    parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
+    parser.add_argument("--table-dir", type=Path, default=TABLE_DIR)
     return parser.parse_args()
 
 
 def main() -> int:
+    global FIG_DIR, RESULTS_DIR, TABLE_DIR
     args = parse_args()
+    FIG_DIR = args.fig_dir
+    RESULTS_DIR = args.results_dir
+    TABLE_DIR = args.table_dir
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
@@ -2132,6 +2408,7 @@ def main() -> int:
                 results.append(run_logged("OEM-HiddenController", lambda: run_oem_hidden_controller(train, validation, local_args)))
         sindy_result, sindy_names, sindy_coeff = run_logged("SINDy", lambda: run_sindy(xu, deriv, validation, local_args))
         results.append(sindy_result)
+        results.append(run_logged("Integrated-SINDy", lambda: run_integrated_sindy(train, xu, deriv, validation, local_args)))
         symbolic_result, symbolic_names, symbolic_coeff = run_logged(
             "Symbolic-Stepwise",
             lambda: run_symbolic_regression(xu, deriv, validation, local_args),

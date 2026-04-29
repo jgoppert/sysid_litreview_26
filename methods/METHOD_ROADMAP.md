@@ -31,15 +31,17 @@ families have executable comparison rows.
 | Folder | Method Family | Benchmark Role | Figure/Table Needed |
 | --- | --- | --- | --- |
 | `output_error/` | OEM / PEM | Primary classical baseline. | trajectory, RMSE, parameter error, cost, identifiability |
-| `equation_error/` | equation error / OLS | Fast biased baseline under measurement noise. | parameter error, noise sensitivity |
-| `filter_error/` | filter error / Kalman PEM | Handles process and measurement noise. | trajectory/RMSE under gust mismatch |
-| `subspace/` | N4SID / MOESP | Linear control-ready state-space baseline. | prediction RMSE, model order sweep |
 | `sindy/` | sparse library regression | Interpretable flexible-structure baseline. | discovered terms, RMSE, sparsity sweep |
 | `pinn/` | inverse PINN | Physics-constrained neural estimator. | training loss, trajectory fit, parameter error |
-| `symbolic_regression/` | symbolic regression | Free-form interpretable model discovery. | discovered equation complexity vs error |
 | `neural_residual/` | UDE / neural residual model | Flexible residual dynamics benchmark. | residual fit, extrapolation RMSE |
-| `uncertainty/` | CRLB/Bayesian/UQ | Confidence and identifiability diagnostics. | CRLB bars, covariance/correlation heatmap |
 | `frequency_domain/` | ETFE/Welch/frequency-domain methods | Literature/taxonomy support until a frequency-suitable excitation exists. | workflow/taxonomy figure, optional FRF demo |
+
+The shared comparison suite also implements several compact rows directly in
+`comparison_suite.py`: equation-error LS, EKF parameter identification,
+linear/subspace predictors, symbolic stepwise regression, and Fisher-information
+diagnostics. These are kept in the suite because they share preprocessing,
+train/validation splits, and reporting code rather than having substantial
+standalone workflows.
 
 ## Tables To Generate
 

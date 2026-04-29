@@ -8,18 +8,19 @@ easy to upload to Overleaf.
 
 - `common/` shared aircraft model, simulation setup, datasets, metrics, and plotting helpers.
 - `output_error/` output-error method (OEM), including single-shooting and multiple-shooting.
-- `equation_error/` equation-error and least-squares derivative baselines.
-- `filter_error/` filter-error or Kalman-filter prediction-error variants.
-- `subspace/` N4SID/MOESP-style linear state-space benchmarks.
 - `frequency_domain/` ETFE/Welch/frequency-domain demonstration figures.
 - `sindy/` sparse identification of nonlinear dynamics.
 - `pinn/` inverse physics-informed neural-network estimator.
-- `symbolic_regression/` symbolic-regression model-discovery experiments.
 - `neural_residual/` UDE/neural-residual dynamics experiments.
-- `uncertainty/` CRLB, Fisher information, parameter correlation, Bayesian/UQ diagnostics.
 - `fig/` generated figures intended for review before copying into `latex/fig/`.
 - `tables/` generated CSV/LaTeX tables.
 - `results/` raw metrics and metadata.
+
+The paper-scale comparison rows for equation-error LS, EKF parameter
+identification, linear/subspace models, symbolic stepwise regression, and
+Fisher-information diagnostics currently live in `comparison_suite.py`. Separate
+empty placeholder folders for those rows were removed to keep the workspace from
+suggesting standalone implementations that do not exist.
 
 ## Current Commands
 

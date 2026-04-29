@@ -763,11 +763,15 @@ The SINDy row uses a structured sparse coefficient formulation. It regresses the
 EOM-inferred aerodynamic coefficients $C_L$, $C_D$, and $C_m$ on protected
 low-order aircraft terms plus a sparse residual library in one fit. Protected
 terms are always retained, while residual-library terms are selected by
-sequential thresholded least squares. The stepwise symbolic baseline remains a
-black-box sparse derivative model. Both are sensitive to derivative quality and
-to whether the library contains the true hidden mechanism. Saturations, rate
-limits, and recovery gates are especially hard because they appear only near
-boundaries unless the experiment deliberately visits those regions.
+sequential thresholded least squares. The Integrated-SINDy row uses the same
+structured library but fits its coefficients by minimizing integrated trajectory
+output error with CasADi/IPOPT, making it closer to OEM and avoiding direct
+equation-error coefficient inversion. The stepwise symbolic baseline remains a
+black-box sparse derivative model. These sparse-library methods are sensitive
+to derivative quality, excitation, and to whether the library contains the true
+hidden mechanism. Saturations, rate limits, and recovery gates are especially
+hard because they appear only near boundaries unless the experiment
+deliberately visits those regions.
 
 \paragraph{PINN, UDE, GP/RBF, and neural surrogates.}
 The coefficient-closure PINN and UDE residual models keep the longitudinal
@@ -1121,13 +1125,37 @@ functions from \eqref{eq:code_sindy_structured}, initialized from the validation
 initial condition and driven only by the pilot-command history. Thus SINDy is
 compared as a sparse aerodynamic-closure method rather than as an unconstrained
 black-box state-derivative model.
+
+The unique \texttt{Integrated-SINDy} row uses the same coefficient library but
+fits the coefficients through an output-error objective,
+\begin{equation}
+    \min_{\beta,\xi,\mathbf{x}_{0,i}}
+    \sum_{i,k}
+    \left\|
+    R^{-1/2}
+    \left(\mathbf{x}_{i,k}
+    -\mathbf{y}_{i,k}\right)
+    \right\|_2^2
+    +\lambda_1\sum_j \sqrt{\xi_j^2+\epsilon},
+    \qquad
+    \mathbf{x}_{i,k+1}
+    =
+    \Phi_{\mathrm{RK4}}(\mathbf{x}_{i,k},\mathbf{u}_{i,k};
+        \beta,\xi).
+    \label{eq:code_integrated_sindy}
+\end{equation}
+The protected $\beta$ coefficients and sparse residual $\xi$ coefficients are
+estimated simultaneously. This is more expensive than coefficient-inversion
+SINDy, but it is less tied to numerical differentiation and is conceptually
+closer to OEM.
 The stepwise symbolic baseline greedily adds terms that reduce
 \[
     \log(\mathrm{MSE})+
     \rho\,n_{\mathrm{terms}}\log(N)/N
 \]
 and then refits ridge coefficients on the selected support. These correspond to
-\texttt{fit\_sindy} and \texttt{fit\_symbolic\_stepwise}.
+\texttt{fit\_sindy}, \texttt{run\_integrated\_sindy}, and
+\texttt{fit\_symbolic\_stepwise}.
 
 \paragraph{UDE residual.}
 The UDE residual target is the measured derivative error relative to the
@@ -1311,9 +1339,9 @@ Koopman-EDMD &
 Frequency-Welch &
 \eqref{eq:code_frequency} &
 \texttt{fit\_frequency\_linear\_model}, \texttt{run\_frequency\_linear}. \\
-SINDy and symbolic stepwise &
-\eqref{eq:code_sindy_library} &
-\texttt{sindy\_library}, \texttt{fit\_sindy}, \texttt{fit\_symbolic\_stepwise}. \\
+SINDy, Integrated-SINDy, and symbolic stepwise &
+\eqref{eq:code_sindy_library}, \eqref{eq:code_integrated_sindy} &
+\texttt{sindy\_library}, \texttt{fit\_sindy}, \texttt{run\_integrated\_sindy}, \texttt{fit\_symbolic\_stepwise}. \\
 UDE, PINN closure, hidden-control neural rows &
 \eqref{eq:code_ude}--\eqref{eq:code_gp_closure} &
 \texttt{run\_ude}, \texttt{run\_pinn\_closure},
@@ -1384,7 +1412,7 @@ rate limits, and panic/recovery gates are difficult to identify unless the test
 data visit those regions, and their absence from ordinary lap data can make the
 controller appear as ordinary aerodynamic or actuator model error.
 
-Figure~\ref{fig:shared_train_time_accuracy_tradeoff} places the same results on a cost-error plot. The horizontal axis reports training or nonlinear-solve time, while the vertical axis reports the normalized validation trajectory error score; lower vertical position is better. This view separates methods that are statistically attractive but computationally expensive from methods that are fast but sensitive to noise or model mismatch. In the direct-state case, neural residual and coefficient-closure approaches achieve low error with short GPU training time, whereas CasADi/IPOPT OEM methods spend more time in nonlinear optimization. In the mocap-derived case, the dominant issue is no longer training cost but measurement preprocessing: several fast derivative-based methods become inaccurate because the reconstructed aerodynamic states are poor dependent variables.
+Figure~\ref{fig:shared_train_time_accuracy_tradeoff} places the same results on a cost-error plot. The horizontal axis reports training or nonlinear-solve wall time, while the vertical axis reports the normalized validation trajectory error score; lower vertical position is better. The detailed appendix tables also report process CPU time, CUDA event training time, and peak CUDA memory for PyTorch rows when a GPU is used. This distinction matters when runs are parallelized: wall time measures user wait time, CPU time measures host work consumed by each process, and GPU event time isolates the neural training kernels. In the direct-state case, neural residual and coefficient-closure approaches achieve low error with short GPU training time, whereas CasADi/IPOPT OEM and Integrated-SINDy methods spend more time in nonlinear optimization. In the mocap-derived case, the dominant issue is no longer training cost but measurement preprocessing: several fast derivative-based methods become inaccurate because the reconstructed aerodynamic states are poor dependent variables.
 
 \begin{figure}[H]
     \centering
