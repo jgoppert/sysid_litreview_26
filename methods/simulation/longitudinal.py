@@ -84,6 +84,7 @@ class SimulationConfig:
         "open_loop",
         "sine_sweep",
         "aggressive",
+        "trim_grid",
         "safe_loop",
         "open_loop_safe",
         "sine_sweep_safe",
@@ -504,6 +505,46 @@ def aggressive_command(
     return np.column_stack((np.clip(thrust, 0.08, 2.80), np.clip(elevator, -0.35, 0.35)))
 
 
+def local_trim_grid_command(
+    t: np.ndarray,
+    u_trim: np.ndarray,
+    rng: np.random.Generator,
+    *,
+    split: Literal["train", "validation"],
+) -> np.ndarray:
+    """Small-signal local excitation around a selected operating point."""
+
+    duration = max(t[-1] - t[0], 1.0)
+    thrust = np.full_like(t, u_trim[0])
+    elevator = np.full_like(t, u_trim[1])
+    envelope = np.sin(np.pi * np.clip(t / duration, 0.0, 1.0)) ** 0.5
+    freq_scale = 1.0 if split == "train" else 1.12
+
+    # Independent low-amplitude multisines keep each trial close to its local
+    # operating point while providing enough bandwidth to fit local linear maps.
+    for _ in range(5):
+        freq = freq_scale * rng.uniform(0.05, 0.65)
+        phase = rng.uniform(0.0, 2.0 * np.pi)
+        thrust += rng.uniform(0.025, 0.085) * envelope * np.sin(2.0 * np.pi * freq * t + phase)
+    for _ in range(7):
+        freq = freq_scale * rng.uniform(0.08, 2.40)
+        phase = rng.uniform(0.0, 2.0 * np.pi)
+        elevator += rng.uniform(0.006, 0.024) * envelope * np.sin(2.0 * np.pi * freq * t + phase)
+
+    for _ in range(3):
+        center = rng.uniform(0.12 * duration, 0.86 * duration)
+        width = rng.uniform(0.20, 0.65)
+        sign = rng.choice([-1.0, 1.0])
+        doublet = 0.5 * (
+            np.tanh(28.0 * (t - center))
+            - 2.0 * np.tanh(28.0 * (t - center - width))
+            + np.tanh(28.0 * (t - center - 2.0 * width))
+        )
+        elevator += sign * rng.uniform(0.006, 0.020) * doublet
+
+    return np.column_stack((np.clip(thrust, 0.0, 3.0), np.clip(elevator, -0.35, 0.35)))
+
+
 def actuator_step(u_prev: np.ndarray, u_cmd: np.ndarray, dt: float) -> np.ndarray:
     tau = np.array([0.12, 0.055])
     rate_limit = np.array([7.0, 2.4])
@@ -596,6 +637,28 @@ def sample_initial_state(
     )
 
 
+def sample_trim_grid_operating_point(
+    aircraft: Aircraft,
+    aero: NominalAero,
+    rng: np.random.Generator,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Choose one local operating point for trim-grid small-signal excitation."""
+
+    speeds = np.array([9.5, 11.0, 13.0, 15.0, 18.0, 22.0])
+    speed = float(speeds[int(rng.integers(0, len(speeds)))])
+    x_ref = trim_state(aircraft, aero, speed=speed)
+    x_ref = x_ref + np.array(
+        [
+            rng.uniform(-0.20, 0.20),
+            np.deg2rad(rng.uniform(-0.45, 0.45)),
+            np.deg2rad(rng.uniform(-0.80, 0.80)),
+            np.deg2rad(rng.uniform(-2.0, 2.0)),
+        ]
+    )
+    u_ref = trim_controls(aircraft, aero, x_ref)
+    return x_ref, u_ref
+
+
 def simulate_trial(
     *,
     split: Literal["train", "validation"],
@@ -608,10 +671,23 @@ def simulate_trial(
     aero = aero or NominalAero()
     rng = np.random.default_rng(seed)
     t = make_time(config.duration, config.dt)
-    x_trim = trim_state(aircraft, aero)
-    u_trim = trim_controls(aircraft, aero, x_trim)
-    x0 = sample_initial_state(x_trim, rng, config.dataset_mode, split)
-    if config.dataset_mode in {"sine_sweep", "sine_sweep_safe"}:
+    if config.dataset_mode == "trim_grid":
+        x_trim, u_trim = sample_trim_grid_operating_point(aircraft, aero, rng)
+        x0 = x_trim + np.array(
+            [
+                rng.uniform(-0.18, 0.18),
+                np.deg2rad(rng.uniform(-0.70, 0.70)),
+                np.deg2rad(rng.uniform(-1.00, 1.00)),
+                np.deg2rad(rng.uniform(-3.0, 3.0)),
+            ]
+        )
+    else:
+        x_trim = trim_state(aircraft, aero)
+        u_trim = trim_controls(aircraft, aero, x_trim)
+        x0 = sample_initial_state(x_trim, rng, config.dataset_mode, split)
+    if config.dataset_mode == "trim_grid":
+        u_cmd = local_trim_grid_command(t, u_trim, rng, split=split)
+    elif config.dataset_mode in {"sine_sweep", "sine_sweep_safe"}:
         u_cmd = sine_sweep_command(t, u_trim, rng, split=split)
     elif config.dataset_mode in {"aggressive", "aggressive_safe"}:
         u_cmd = aggressive_command(t, u_trim, rng, split=split)
@@ -784,7 +860,7 @@ def write_dataset(output_dir: Path, config: SimulationConfig, make_plot: bool = 
         "load_names": LOAD_NAMES.tolist(),
         "files": {"train": "train.npz", "validation": "validation.npz"},
         "notes": [
-            f"dataset_mode={config.dataset_mode}. safe_loop/open_loop_safe/sine_sweep_safe/aggressive_safe/proprietary_autopilot use a hidden SAFE/AS3X pitch input modifier; open_loop, sine_sweep, and aggressive use pilot commands with actuator lag only.",
+            f"dataset_mode={config.dataset_mode}. safe_loop/open_loop_safe/sine_sweep_safe/aggressive_safe/proprietary_autopilot use a hidden SAFE/AS3X pitch input modifier; trim_grid uses local small-signal training and validation around multiple trim-like operating points; open_loop, sine_sweep, and aggressive use pilot commands with actuator lag only.",
             "u_cmd is the commanded input; u_act is the actuator-realized input used by the simulator.",
             "autopilot_correction is written for diagnostic use only; practical identification should treat it as hidden.",
             "mocap_meas is the primary experimental measurement channel: inertial position and pitch attitude.",

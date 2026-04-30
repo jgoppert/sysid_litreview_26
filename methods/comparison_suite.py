@@ -33,6 +33,16 @@ AERO_COEFFICIENT_NAMES = ["CL", "CD", "Cm"]
 COEFF_NAMES = ["C_L", "C_D", "C_M"]
 PARAMETER_NAMES = ["C_L0", "C_L_alpha", "C_D0", "k", "C_M0", "C_M_alpha", "C_M_Q", "C_M_delta_e"]
 STATE_LABELS = [r"$V$ [m/s]", r"$\alpha$ [deg]", r"$\gamma$ [deg]", r"$Q$ [deg/s]"]
+
+
+def default_stitch_train_dataset(dataset: Path) -> Path:
+    candidate = dataset.parent / "longitudinal_3dof_nonlinear_trim_grid"
+    if not candidate.exists():
+        raise FileNotFoundError(
+            f"Model-Stitching requires the trim-grid training dataset at {candidate}. "
+            "Generate it with './results.py simulate --dataset-modes trim_grid'."
+        )
+    return candidate
 STATE_NOISE = np.array([0.08, 0.0035, 0.0035, 0.012])
 
 
@@ -1523,49 +1533,79 @@ def fit_discrete_linear_model(xk: np.ndarray, uk: np.ndarray, xkp1: np.ndarray, 
     return np.linalg.solve(gram, rhs)
 
 
-def run_model_stitching(train_x: np.ndarray, train_u: np.ndarray, validation: SplitData, args: argparse.Namespace) -> MethodResult:
+def run_model_stitching(
+    train_x: np.ndarray,
+    train_u: np.ndarray,
+    train: SplitData,
+    validation: SplitData,
+    args: argparse.Namespace,
+) -> MethodResult:
     start = time.perf_counter()
-    n_models = max(1, min(int(args.stitch_models), train_x.shape[0]))
-    labels, _initial_centers = kmeans_labels(train_x[:, 0, :], n_models, args.seed)
     global_xk = train_x[:, :-1, :].reshape(-1, 4)
     global_uk = train_u[:, :-1, :].reshape(-1, 2)
     global_xkp1 = train_x[:, 1:, :].reshape(-1, 4)
-    global_coeff = fit_discrete_linear_model(global_xk, global_uk, global_xkp1, args.stitch_ridge)
+    global_x_ref = np.mean(train.trim_state, axis=0)
+    global_u_ref = np.mean(train.trim_controls, axis=0)
+    trial_operating = np.column_stack((train.trim_state.reshape(train.n_trials, -1), train.trim_controls.reshape(train.n_trials, -1)))
+    if np.max(np.std(trial_operating, axis=0)) < 1e-9:
+        trial_operating = np.column_stack((train_x[:, 0, :], train_u[:, 0, :]))
+    n_models = max(1, min(int(args.stitch_models), train.n_trials))
+    labels, _ = kmeans_labels(trial_operating, n_models, args.seed)
+    global_coeff = fit_discrete_linear_model(
+        global_xk - global_x_ref,
+        global_uk - global_u_ref,
+        global_xkp1 - global_x_ref,
+        args.stitch_ridge,
+    )
     coeffs = []
     centers = []
+    local_x_refs = []
+    local_u_refs = []
     one_step_errors = []
     min_samples = max(8, 8 * (1 + train_x.shape[2] + train_u.shape[2]))
     for model_idx in range(n_models):
         trial_ids = np.flatnonzero(labels == model_idx)
         if len(trial_ids):
+            x_ref = np.mean(train.trim_state[trial_ids], axis=0)
+            u_ref = np.mean(train.trim_controls[trial_ids], axis=0)
             xk = train_x[trial_ids, :-1, :].reshape(-1, 4)
             uk = train_u[trial_ids, :-1, :].reshape(-1, 2)
             xkp1 = train_x[trial_ids, 1:, :].reshape(-1, 4)
         else:
+            x_ref = np.mean(train.trim_state, axis=0)
+            u_ref = np.mean(train.trim_controls, axis=0)
             xk = np.empty((0, 4))
             uk = np.empty((0, 2))
             xkp1 = np.empty((0, 4))
         if len(xk) < min_samples:
             coeff = global_coeff.copy()
+            x_ref = global_x_ref
+            u_ref = global_u_ref
             xk = global_xk
             uk = global_uk
             xkp1 = global_xkp1
         else:
-            coeff = fit_discrete_linear_model(xk, uk, xkp1, args.stitch_ridge)
+            coeff = fit_discrete_linear_model(xk - x_ref, uk - u_ref, xkp1 - x_ref, args.stitch_ridge)
         coeffs.append(coeff)
-        centers.append(xk.mean(axis=0))
-        features = np.column_stack((np.ones(len(xk)), xk, uk))
-        one_step_errors.append(np.mean((features @ coeff - xkp1) ** 2))
+        centers.append(np.concatenate((x_ref, u_ref)))
+        local_x_refs.append(x_ref)
+        local_u_refs.append(u_ref)
+        features = np.column_stack((np.ones(len(xk)), xk - x_ref, uk - u_ref))
+        one_step_errors.append(np.mean((x_ref + features @ coeff - xkp1) ** 2))
     coeffs_arr = np.asarray(coeffs)
     centers_arr = np.asarray(centers)
-    state_scale = global_xk.std(axis=0)
-    state_scale[state_scale < 1e-9] = 1.0
+    local_x_refs_arr = np.asarray(local_x_refs)
+    local_u_refs_arr = np.asarray(local_u_refs)
+    schedule_all = np.column_stack((global_xk, global_uk))
+    schedule_scale = schedule_all.std(axis=0)
+    schedule_scale[schedule_scale < 1e-9] = 1.0
     if args.stitch_length_scale > 0.0:
         length_scale = float(args.stitch_length_scale)
     elif len(centers_arr) > 1:
-        center_z = (centers_arr - global_xk.mean(axis=0)) / state_scale
+        center_z = (centers_arr - schedule_all.mean(axis=0)) / schedule_scale
         dist = np.sqrt(np.sum((center_z[:, None, :] - center_z[None, :, :]) ** 2, axis=2))
-        length_scale = float(np.median(dist[dist > 0.0])) if np.any(dist > 0.0) else 1.0
+        median_center_distance = float(np.median(dist[dist > 0.0])) if np.any(dist > 0.0) else 1.0
+        length_scale = 0.35 * median_center_distance
     else:
         length_scale = 1.0
     length_scale = max(length_scale, 1e-3)
@@ -1573,9 +1613,12 @@ def run_model_stitching(train_x: np.ndarray, train_u: np.ndarray, validation: Sp
     elapsed = time.perf_counter() - start
 
     def step(x: np.ndarray, u: np.ndarray) -> np.ndarray:
-        z = np.concatenate(([1.0], x, u))
-        predictions = np.einsum("j,kjl->kl", z, coeffs_arr)
-        delta = (centers_arr - x) / state_scale
+        dx = x[None, :] - local_x_refs_arr
+        du = u[None, :] - local_u_refs_arr
+        features = np.column_stack((np.ones(len(coeffs_arr)), dx, du))
+        predictions = local_x_refs_arr + np.einsum("kj,kjl->kl", features, coeffs_arr)
+        schedule = np.concatenate((x, u))
+        delta = (centers_arr - schedule) / schedule_scale
         weights = np.exp(-0.5 * np.sum(delta**2, axis=1) / (length_scale**2))
         weight_sum = np.sum(weights)
         if not np.isfinite(weight_sum) or weight_sum <= 1e-12:
@@ -1608,11 +1651,11 @@ def run_model_stitching(train_x: np.ndarray, train_u: np.ndarray, validation: Sp
         validation_trajectories=trajectories,
         validation_coeff_residual=None,
         validation_outputs=None,
-        decision_variables=int(coeffs_arr.size + centers_arr.size + state_scale.size + 1),
+        decision_variables=int(coeffs_arr.size + centers_arr.size + schedule_scale.size + 1),
         train_samples=int(global_xk.shape[0]),
         notes=(
-            f"Fits {n_models} local discrete linear models after clustering training trials by initial state; "
-            f"rollout blends local predictions with RBF weights in state space, length_scale={length_scale:.3g}. "
+            f"Fits {n_models} local discrete deviation models from whole local-excitation trajectory groups; "
+            f"rollout blends local predictions with RBF weights in state-input space, length_scale={length_scale:.3g}. "
             "Validation uses only x0 and the supplied pilot-command history."
         ),
         train_loss_final=train_mse,
@@ -2252,6 +2295,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET, help="directory containing train.npz and validation.npz")
     parser.add_argument(
+        "--train-dataset",
+        type=Path,
+        default=None,
+        help="dataset directory whose train.npz is used for fitting; validation still comes from --dataset",
+    )
+    parser.add_argument(
         "--input-channel",
         choices=["u_act", "u_cmd"],
         default="u_act",
@@ -2275,7 +2324,7 @@ def parse_args() -> argparse.Namespace:
         "--stitch-length-scale",
         type=float,
         default=0.0,
-        help="RBF scheduling length scale in normalized state space; 0 uses median local-center distance",
+        help="RBF scheduling length scale in normalized state-control space; 0 uses 0.35 times the median local-center distance",
     )
     parser.add_argument("--ekf-process-std", type=float, nargs=4, default=[0.05, 0.002, 0.002, 0.01])
     parser.add_argument("--ekf-measurement-std", type=float, nargs=4, default=[0.12, 0.006, 0.006, 0.02])
@@ -2348,15 +2397,29 @@ def main() -> int:
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
-    raw_train, raw_validation = load_dataset(args.dataset)
+    include_methods = set(args.include_methods or ["all"])
+    stitch_requested = "all" in include_methods or "Model-Stitching" in include_methods
+    train_dataset = args.train_dataset or args.dataset
+    raw_train, _unused_train_validation = load_dataset(train_dataset)
+    _unused_validation_train, raw_validation = load_dataset(args.dataset)
+    stitch_raw_train: SplitData | None = None
+    stitch_dataset: Path | None = None
+    if stitch_requested:
+        stitch_dataset = default_stitch_train_dataset(args.dataset)
+        stitch_raw_train, _ = load_dataset(stitch_dataset)
     if args.input_channel == "u_cmd":
         raw_train = replace(raw_train, u_act=raw_train.u_cmd)
         raw_validation = replace(raw_validation, u_act=raw_validation.u_cmd)
+        if stitch_raw_train is not None:
+            stitch_raw_train = replace(stitch_raw_train, u_act=stitch_raw_train.u_cmd)
     device = torch.device(args.device if args.device == "cpu" or torch.cuda.is_available() else "cpu")
     print(f"dataset: {args.dataset}")
     print(f"input channel: {args.input_channel}")
     print(f"state source: {args.state_source}")
+    print(f"train dataset: {train_dataset}")
     print(f"train: {raw_train.n_trials} trials x {raw_train.n_time} samples, validation: {raw_validation.n_trials} trials")
+    if stitch_raw_train is not None and stitch_dataset is not None:
+        print(f"model stitching train: {stitch_dataset} ({stitch_raw_train.n_trials} trim-grid trials)")
     print(f"torch device: {device}")
     dataset_text = str(args.dataset).lower()
     has_hidden_controller = (
@@ -2378,8 +2441,6 @@ def main() -> int:
     last_sindy_coeff: np.ndarray | None = None
     last_symbolic_names: list[str] | None = None
     last_symbolic_coeff: np.ndarray | None = None
-    include_methods = set(args.include_methods or ["all"])
-
     def wants(method_name: str) -> bool:
         return "all" in include_methods or method_name in include_methods
 
@@ -2389,6 +2450,9 @@ def main() -> int:
         if source == "mocap":
             train = replace(train, y_meas=train.mocap_derived_state)
             validation = replace(validation, y_meas=validation.mocap_derived_state)
+        stitch_train = stitch_raw_train
+        if source == "mocap" and stitch_train is not None:
+            stitch_train = replace(stitch_train, y_meas=stitch_train.mocap_derived_state)
         local_args = argparse.Namespace(**vars(args))
         if not np.isfinite(local_args.ude_gain):
             local_args.ude_gain = 1.0 if source == "direct" else 0.1
@@ -2407,7 +2471,20 @@ def main() -> int:
         if wants("Linear-SS"):
             results.append(run_logged("Linear-SS", lambda: run_linear_state_space(x_smooth, train.u_act, validation)))
         if wants("Model-Stitching"):
-            results.append(run_logged("Model-Stitching", lambda: run_model_stitching(x_smooth, train.u_act, validation, local_args)))
+            if stitch_train is None:
+                raise RuntimeError("Model-Stitching requested without a loaded trim-grid training dataset")
+            stitch_x_smooth, _stitch_dxdt = smooth_trials(
+                stitch_train.y_meas,
+                stitch_train.dt,
+                local_args.smooth_window,
+                local_args.polyorder,
+            )
+            results.append(
+                run_logged(
+                    "Model-Stitching",
+                    lambda: run_model_stitching(stitch_x_smooth, stitch_train.u_act, stitch_train, validation, local_args),
+                )
+            )
         if wants("Koopman-EDMD"):
             results.append(run_logged("Koopman-EDMD", lambda: run_koopman_edmd(x_smooth, train.u_act, validation, local_args)))
         if wants("Subspace-Hankel"):

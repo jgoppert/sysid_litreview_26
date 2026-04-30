@@ -23,11 +23,21 @@ METHOD_RESULTS = METHODS / "results"
 METHOD_FIG = METHODS / "fig"
 LATEX_GENERATED = LATEX / "generated"
 LATEX_FIG = LATEX / "fig"
-DATASET_MODES = ("open_loop", "sine_sweep", "aggressive", "open_loop_safe", "sine_sweep_safe", "aggressive_safe", "safe_loop")
+DATASET_MODES = (
+    "open_loop",
+    "sine_sweep",
+    "aggressive",
+    "trim_grid",
+    "open_loop_safe",
+    "sine_sweep_safe",
+    "aggressive_safe",
+    "safe_loop",
+)
 DATASET_OUTPUTS = {
     "open_loop": METHODS / "data" / "longitudinal_3dof_nonlinear_open_loop",
     "sine_sweep": METHODS / "data" / "longitudinal_3dof_nonlinear_sine_sweep",
     "aggressive": METHODS / "data" / "longitudinal_3dof_nonlinear_aggressive",
+    "trim_grid": METHODS / "data" / "longitudinal_3dof_nonlinear_trim_grid",
     "open_loop_safe": METHODS / "data" / "longitudinal_3dof_nonlinear_open_loop_safe",
     "sine_sweep_safe": METHODS / "data" / "longitudinal_3dof_nonlinear_sine_sweep_safe",
     "aggressive_safe": METHODS / "data" / "longitudinal_3dof_nonlinear_aggressive_safe",
@@ -38,6 +48,7 @@ DATASET_TITLES = {
     "open_loop": "Open-loop maneuver",
     "sine_sweep": "Aggressive sine-sweep maneuver",
     "aggressive": "Aggressive nonlinear maneuver",
+    "trim_grid": "Local trim-grid small-deviation maneuver",
     "open_loop_safe": "Open-loop maneuver with SAFE enabled",
     "sine_sweep_safe": "Aggressive sine-sweep with SAFE enabled",
     "aggressive_safe": "Aggressive maneuver with SAFE enabled",
@@ -74,6 +85,30 @@ GPU_METHOD_WORKERS = {
     "UDE-HiddenControl",
     "PINN-HiddenElevator",
     "NN-CoeffSurrogate",
+}
+
+METHOD_TRAINING_MODES = {
+    "Nominal": "open_loop",
+    "Linear-SS": "trim_grid",
+    "Model-Stitching": "trim_grid",
+    "Subspace-Hankel": "trim_grid",
+    "Frequency-Welch": "trim_grid",
+    "Koopman-EDMD": "aggressive",
+    "EquationError-LS": "aggressive",
+    "EKF-ParamID": "aggressive",
+    "Fisher-UQ": "aggressive",
+    "OEM-SS": "aggressive",
+    "OEM-MocapOutput": "aggressive",
+    "Variational-Mocap": "aggressive",
+    "SINDy": "aggressive",
+    "Symbolic-Stepwise": "aggressive",
+    "GP-CoeffClosure": "aggressive",
+    "UDE-Residual": "aggressive",
+    "PINN-CoeffClosure": "aggressive",
+    "NN-CoeffSurrogate": "aggressive",
+    "OEM-HiddenController": "safe_loop",
+    "UDE-HiddenControl": "safe_loop",
+    "PINN-HiddenElevator": "safe_loop",
 }
 
 FIGURE_EXPORTS = {
@@ -1070,6 +1105,10 @@ def suite_command(
     table_dir: Path = METHODS / "tables",
     fig_dir: Path = METHOD_FIG,
 ) -> list[str]:
+    include_methods = getattr(args, "include_methods", None)
+    train_mode = None
+    if include_methods and len(include_methods) == 1 and include_methods[0] != "all":
+        train_mode = METHOD_TRAINING_MODES.get(include_methods[0], "aggressive")
     command = [
         methods_python(),
         str(METHODS / "comparison_suite.py"),
@@ -1079,7 +1118,12 @@ def suite_command(
         args.input_channel,
         "--state-source",
         args.state_source,
-        "--epochs",
+    ]
+    if train_mode is not None:
+        command.extend(["--train-dataset", str(DATASET_OUTPUTS[train_mode])])
+    command.extend(
+        [
+            "--epochs",
         str(args.epochs),
         "--max-samples",
         str(args.max_samples),
@@ -1107,8 +1151,8 @@ def suite_command(
         str(table_dir),
         "--fig-dir",
         str(fig_dir),
-    ]
-    include_methods = getattr(args, "include_methods", None)
+        ]
+    )
     if include_methods and include_methods != ["all"]:
         command.append("--include-methods")
         command.extend(include_methods)

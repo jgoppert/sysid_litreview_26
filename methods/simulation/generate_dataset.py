@@ -26,6 +26,7 @@ def parse_args() -> argparse.Namespace:
             "open_loop",
             "sine_sweep",
             "aggressive",
+            "trim_grid",
             "safe_loop",
             "open_loop_safe",
             "sine_sweep_safe",

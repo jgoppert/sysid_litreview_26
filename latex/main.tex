@@ -733,6 +733,21 @@ For this reason the benchmark reports separate rows for direct-state and mocap-d
 
 The observation-rate study decimates the same 100 Hz mocap stream to 10 Hz and 2 Hz before applying the state-reconstruction pipeline. This does not change the aircraft trajectory or aerodynamic model; it only changes the information available to the estimator. The resulting degradation quantifies the practical observability and sampling limitations imposed by slower sensors. As the observation rate approaches the dominant aircraft modes, Nyquist limitations and filtering tradeoffs become central rather than incidental implementation details.
 
+The method comparison is now organized as a train-once, validate-everywhere
+benchmark. Each method is assigned one identification dataset that matches its
+intended experimental design, and the fitted model is then rolled out on every
+validation condition. Local linear, frequency-domain, subspace, and
+model-stitching baselines train on the trim-grid dataset because those methods
+are normally supported by small-deviation excitation near selected operating
+points. Nonlinear aerodynamic residual and coefficient-closure methods train on
+the aggressive SAFE-off dataset because they need high-angle-of-attack,
+pitch-rate, speed, and control variation to expose the hidden aerodynamic
+terms. Hidden-control methods train on the SAFE recovery-probe dataset because
+that is the dataset where the external pilot command differs systematically
+from the internal elevator command. The nominal model has no fitted training
+solve. This protocol prevents the easier in-distribution experiment in which a
+separate model is trained for every validation maneuver.
+
 The local open-loop dataset intentionally remains a near-trim maneuver. It is
 included because small-amplitude identification is still a common aircraft
 SysID use case and because it provides a sanity check where global linear
@@ -746,13 +761,18 @@ $q\in[-95,90]^\circ$/s over the union of regimes. The validation split shifts
 some high-$\alpha$ bands upward to test interpolation and limited
 extrapolation. SAFE-on trials use a broad but recoverable subset of the same
 idea so that the hidden recovery loop can visibly suppress high-$\alpha$
-excursions. This design separates the question ``does a local linear model work
-near trim?'' from the harder question ``does one global model remain adequate
-across trim, stall onset, recovery, and speed variation?''
+excursions. The trim-grid dataset is different from the generic open-loop
+dataset: it consists of small multisine and doublet perturbations about several
+trim-like operating points and is used to support the local-model and
+frequency-domain training protocols. This design separates the question ``does
+a local linear model work near trim?'' from the harder question ``does one
+identified model remain adequate across trim, stall onset, recovery, and speed
+variation?''
 
 \subsection*{Implemented Methods}
-Each method is run from the same generated train/validation splits. Unless stated
-otherwise, methods are given the external pilot command $\mathbf{u}_{\mathrm{cmd}}$
+Each method is run from its assigned training split and then evaluated on the
+common validation suite. Unless stated otherwise, methods are given the external
+pilot command $\mathbf{u}_{\mathrm{cmd}}$
 and either direct noisy states or states reconstructed from 100 Hz motion capture.
 The validation score is always computed against the simulator truth and is not a
 training objective. It is the mean normalized state RMSE over the validation
@@ -1090,42 +1110,55 @@ prediction, not as physical interpretability. This is
 \texttt{run\_linear\_state\_space}.
 
 \paragraph{Model-Stitching.}
-The stitched local-model row first clusters training trajectories by their
-initial state $\mathbf{x}_{i,0}$. With $M$ local models, k-means assigns each
-training trajectory to a regime index $r_i\in\{1,\ldots,M\}$. For each regime,
-the code fits the same affine one-step model as \eqref{eq:code_linear_ss},
+The stitched local-model row uses a different training protocol from the other
+rows. Rather than fitting on the same maneuver that defines each validation
+case, it always trains on the trim-grid dataset: a collection of small-deviation
+multisine and doublet records collected about several trim-like operating
+points. This reflects the usual gain-scheduled aircraft-identification workflow:
+collect local excitation near several operating points, fit local deviation
+models, and then stitch those local models for broader-envelope prediction.
+With $M$ local models, k-means assigns each trim-grid trajectory to a regime
+index $r_i\in\{1,\ldots,M\}$ using its local operating state and control
+$\boldsymbol{\rho}_i=[\mathbf{x}_{i,\mathrm{trim}}^T,
+\mathbf{u}_{i,\mathrm{trim}}^T]^T$. For each regime, the code fits an affine
+deviation model,
 \begin{equation}
     \widehat{C}^{(m)}
     =
     \arg\min_C
     \sum_{i:r_i=m}\sum_k
     \left\|
-    \mathbf{x}_{i,k+1}
+    (\mathbf{x}_{i,k+1}-\mathbf{x}^{(m)}_{\mathrm{trim}})
     -
-    [1,\mathbf{x}_{i,k}^T,\mathbf{u}_{i,k}^T]C
+    [1,(\mathbf{x}_{i,k}-\mathbf{x}^{(m)}_{\mathrm{trim}})^T,
+       (\mathbf{u}_{i,k}-\mathbf{u}^{(m)}_{\mathrm{trim}})^T]C
     \right\|_2^2
     +\lambda\|C\|_F^2.
     \label{eq:code_model_stitching_local}
 \end{equation}
-Each local model is associated with the mean state
-$\boldsymbol{\mu}^{(m)}$ of its assigned samples. During rollout, the local
+Each local model is associated with the operating point
+$\boldsymbol{\mu}^{(m)}=[(\mathbf{x}^{(m)}_{\mathrm{trim}})^T,
+(\mathbf{u}^{(m)}_{\mathrm{trim}})^T]^T$. During rollout, the local
 predictions
 \[
     \hat{\mathbf{x}}_{k+1}^{(m)}
     =
-    [1,\hat{\mathbf{x}}_k^T,\mathbf{u}_k^T]\widehat{C}^{(m)}
+    \mathbf{x}^{(m)}_{\mathrm{trim}}
+    +
+    [1,(\hat{\mathbf{x}}_k-\mathbf{x}^{(m)}_{\mathrm{trim}})^T,
+       (\mathbf{u}_k-\mathbf{u}^{(m)}_{\mathrm{trim}})^T]\widehat{C}^{(m)}
 \]
 are blended with normalized radial-basis scheduling weights
 \begin{align}
-    w_m(\hat{\mathbf{x}}_k)
+    w_m(\hat{\mathbf{x}}_k,\mathbf{u}_k)
     &=
     \frac{
     \exp\left[-\frac{1}{2\ell^2}
-    \left\|S_x^{-1}(\hat{\mathbf{x}}_k-\boldsymbol{\mu}^{(m)})\right\|_2^2\right]
+    \left\|S_\rho^{-1}([\hat{\mathbf{x}}_k^T,\mathbf{u}_k^T]^T-\boldsymbol{\mu}^{(m)})\right\|_2^2\right]
     }{
     \sum_j
     \exp\left[-\frac{1}{2\ell^2}
-    \left\|S_x^{-1}(\hat{\mathbf{x}}_k-\boldsymbol{\mu}^{(j)})\right\|_2^2\right]
+    \left\|S_\rho^{-1}([\hat{\mathbf{x}}_k^T,\mathbf{u}_k^T]^T-\boldsymbol{\mu}^{(j)})\right\|_2^2\right]
     },\\
     \hat{\mathbf{x}}_{k+1}
     &= \sum_{m=1}^{M} w_m(\hat{\mathbf{x}}_k)\hat{\mathbf{x}}_{k+1}^{(m)}.
@@ -1133,8 +1166,11 @@ are blended with normalized radial-basis scheduling weights
 \end{align}
 The default implementation uses $M=6$, ridge $\lambda=10^{-7}$, and chooses
 the scheduling length scale $\ell$ from the median distance between local-model
-centers in normalized state space. Validation is an open-loop rollout from the
-validation initial condition using only the pilot-command history. This is
+centers in normalized state-control space. Validation is an open-loop rollout
+from the validation initial condition using only the pilot-command history. The
+same trim-grid-trained stitched model is evaluated against each validation
+dataset, including the trim-grid validation set where it is expected to perform
+well and the aggressive datasets where it tests cross-regime extrapolation. This is
 \texttt{run\_model\_stitching}.
 
 \paragraph{Subspace-Hankel.}
