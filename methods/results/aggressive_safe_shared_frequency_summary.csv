@@ -1,0 +1,3 @@
+method,output,mean_coherence,peak_frequency_hz,peak_magnitude_db
+Frequency-Welch,Q,0.09885071057809802,31.640625,26.99480902815854
+Frequency-Welch,gamma,0.0871252251299161,34.5703125,7.285432558546461

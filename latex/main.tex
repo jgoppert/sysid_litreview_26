@@ -87,7 +87,7 @@ of Nonlinear Dynamics (SINDy) trade some of the guarantees and interpretability
 of fixed-form models for flexibility in representing missing or modified
 dynamics.
 
-In the remainder of this section we will discuss the development of system identification categorized by modeling role. Frequency-domain methods identify spectral input-output structure and connect naturally to frequency-based control. Fixed-form time-domain methods estimate interpretable parameters within a prescribed state-space or aerodynamic model. Surrogate methods replace an expensive or unknown map, such as an aerodynamic coefficient table, CFD solver, or full input-output dynamics, with a cheaper learned approximation. Finally, hybrid grey-box methods combine these viewpoints by retaining trusted physics while learning residual or closure terms from data.
+In the remainder of this section we will discuss the development of system identification categorized by modeling role. Frequency-domain methods identify spectral input-output structure and connect naturally to frequency-based control. Fixed-form time-domain methods estimate interpretable parameters within a prescribed state-space or aerodynamic model. Surrogate methods replace an expensive or unknown map, such as an aerodynamic coefficient table, CFD solver, or full input-output dynamics, with a cheaper learned approximation. Local-model and model-stitching methods approximate a broad nonlinear envelope by fitting simpler models in separate operating regions and then switching or blending among them. Finally, hybrid grey-box methods combine these viewpoints by retaining trusted physics while learning residual or closure terms from data.
 
 The central argument of this review is that modern aircraft system
 identification is not replacing classical parametric methods with unconstrained
@@ -256,6 +256,8 @@ Multi-fidelity surrogate modeling extends this idea by combining data sources wi
 Reduced-order modeling is another surrogate route for high-dimensional flow physics. Proper orthogonal decomposition (POD) represents flow fields in a low-dimensional modal basis \citep{berkooz1993pod}, while dynamic mode decomposition (DMD) extracts coherent spatio-temporal modes from simulation or experimental data \citep{schmid2010dmd}. Koopman-operator methods provide a related lifted-linear view of nonlinear dynamics, originating from Koopman's Hilbert-space formulation \citep{koopman1931hamiltonian} and leading to data-driven approximations such as extended dynamic mode decomposition (EDMD) \citep{williams2015data}. These approaches are not usually flight-test parameter-estimation methods by themselves, but they can produce compact flow, surrogate, or lifted state-space models that feed a lower-dimensional flight-dynamics model.
 
 Neural networks fit naturally within this surrogate taxonomy. A feedforward neural network can approximate an aerodynamic coefficient map, a recurrent or neural state-space model can approximate input-output dynamics, and an autoencoder can learn a latent reduced-order representation. More recently, neural operators such as DeepONet and the Fourier Neural Operator learn mappings between function spaces, making them suitable candidates for CFD-level surrogates that map geometry, boundary conditions, and flight condition to flow fields or aerodynamic loads \citep{lu2021deeponet,li2021fno}. In this review, neural networks are therefore not treated as separate from surrogate models. Instead, they are one flexible surrogate class whose interpretability and usefulness depend on whether they replace the full aircraft dynamics, the aerodynamic closure, a residual correction, or a high-fidelity flow solver.
+
+Model stitching is a related surrogate strategy that trades a single global model for a collection of local models. The idea appears in local-expert and mixture-of-experts models \citep{jacobs1991adaptive}, multiple-model nonlinear modeling and control \citep{murray1997multiple}, and LPV identification \citep{toth2010lpv}. In aircraft applications, the scheduling variables may include airspeed, angle of attack, pitch rate, throttle, elevator, flight mode, or a hidden-controller indicator. A local linear or local aerodynamic-coefficient model can be accurate near trim, another near high-angle-of-attack stall onset, and another during recovery. The stitch may be a hard switch, a gain-scheduled interpolation, or a probabilistic mixture. This is attractive for small-UAS benchmarks because aggressive maneuvers deliberately move across regimes where one global linearization is inadequate. The drawbacks are equally important: regime boundaries must be excited by data, interpolation can create nonphysical force or moment behavior, and hard switching can introduce discontinuities unless the stitched model is constrained carefully.
 
 Classical nonlinear input-output identification also deserves explicit mention. NARX/NARMAX models, Volterra-series methods, and block-oriented Hammerstein-Wiener structures model nonlinear dynamics using lagged inputs and outputs rather than rigid-body state equations; see, for example, the NARMAX treatment of \citet{billings2013nonlinear}. These methods are powerful when the desired product is a predictive input-output model, especially for closed-loop control or signal processing. They are less directly aligned with the present aerodynamic benchmark because the paper asks whether each method can separate missing aerodynamic closure, state reconstruction error, and hidden command reshaping. The implemented Hankel/subspace and Koopman-EDMD rows partially represent this input-output and lifted-linear tradition, but a full NARMAX/block-oriented benchmark remains future work.
 \subsection{Model Flexibility vs.\ Interpretability}\label{sec:flex_int}
@@ -432,8 +434,10 @@ with conventional coefficient expansions
 \end{align}
 
 The nominal parameter vector above is the structure available to the classical
-fixed-form methods. The true simulator intentionally contains additional
-unknown nonlinear aerodynamic terms,
+fixed-form methods. It is an attached-flow model: lift is linear in angle of
+attack, drag is parabolic in lift, and pitching moment is affine in
+$\alpha$, $Q$, and elevator. The true simulator intentionally contains
+additional unknown nonlinear aerodynamic terms,
 \[
 \mathbf{C}_{\mathrm{true}}(\mathbf{x},\mathbf{u})
 =
@@ -441,22 +445,51 @@ unknown nonlinear aerodynamic terms,
 +\Delta\mathbf{C}_{\mathrm{aero}}(\mathbf{x},\mathbf{u}),
 \]
 where $\Delta\mathbf{C}_{\mathrm{aero}}=[\Delta C_L,\Delta C_D,\Delta C_M]^T$ is
-not supplied to the identification algorithms. The residual terms used to
-generate the data are smooth and bounded:
+not supplied to the identification algorithms. The hidden residual includes a
+smooth stall model. Define
+\[
+\alpha_{\mathrm{stall}}=12.0^\circ,\qquad
+w_{\mathrm{stall}}=2.0^\circ,\qquad
+C_{L,\max}=1.05,\qquad
+s_\alpha=\tanh(\alpha/0.015),
+\]
+\[
+g_s =
+\left[
+1+\exp\left(-\frac{|\alpha|-\alpha_{\mathrm{stall}}}{w_{\mathrm{stall}}}\right)
+\right]^{-1},
+\qquad
+\epsilon_\alpha =
+w_{\mathrm{stall}}
+\log\!\left(1+\exp\left(\frac{|\alpha|-\alpha_{\mathrm{stall}}}{w_{\mathrm{stall}}}\right)\right),
+\]
+where the code clips the exponential arguments for numerical stability. The
+true lift coefficient is a smooth attached/separated-flow blend,
 \begin{align}
-\Delta C_L &=
-0.018\tanh^2(1.4\alpha_r)
-+0.010\sin(1.8\delta_r)
-+0.012\alpha_r q_r,\\
+C_{L,\mathrm{sep}} &=
+s_\alpha(C_{L,\max}-1.35\epsilon_\alpha)
++0.035\tanh(1.5\delta_r)
++0.018\tanh(q_r),\\
+C_{L,\mathrm{true}} &=
+(1-g_s)C_{L,\mathrm{nom}}
++g_s C_{L,\mathrm{sep}}
++ (1-0.65g_s)\left[0.010\sin(1.8\delta_r)+0.010\alpha_r q_r\right],
+\end{align}
+and $\Delta C_L=C_{L,\mathrm{true}}-C_{L,\mathrm{nom}}$. Drag and pitching
+moment use the residual forms
+\begin{align}
 \Delta C_D &=
-0.006\alpha_r^4
-+0.004\delta_r^2
-+0.003\left[1+\tanh(3(\alpha-0.13))\right],\\
+0.0035\delta_r^2
++0.0025\alpha_r^4
++g_s\left(0.090+0.95\epsilon_\alpha+4.50\epsilon_\alpha^2\right)
++0.016g_s\max(-V_r,0),\\
 \Delta C_M &=
--0.010\alpha_r^3
+-0.006\alpha_r^3
 +0.006\alpha_r\delta_r
-+0.005\tanh(q_r)|\alpha_r|
-+0.0025\sin(2\gamma),
++0.004\tanh(q_r)|\alpha_r|
++0.0025\sin(2\gamma)
+-g_s\left(0.075+0.55\epsilon_\alpha\right)s_\alpha
+-0.018g_s\tanh(\delta_r),
 \end{align}
 with normalized variables
 \[
@@ -465,10 +498,16 @@ V_r=(V-15)/15,\qquad
 q_r=\mathrm{sat}(Q/0.8),\qquad
 \delta_r=\delta_e/0.25.
 \]
-These terms are deliberately close to the nominal model near trim but nonlinear
-off trim. They create model-form error for fixed-structure OEM and equation
-error fits, while providing a known ground truth for evaluating coefficient
-closure and residual-learning methods.
+This structure is intended to approximate a small RC trainer rather than a
+transport-aircraft polar: the attached-flow lift slope is retained near trim,
+lift approaches a finite separated-flow plateau near $C_L\approx 1$, drag rises
+rapidly in the separated regime, and the pitching moment develops a nose-down
+break for positive high-$\alpha$ flight. The terms create model-form error for
+fixed-structure OEM and equation-error fits, while providing a known ground
+truth for evaluating coefficient closure and residual-learning methods. The
+SAFE-on aggressive case is expected to suppress part of this excitation because
+the hidden controller commands recovery before the aircraft spends much time in
+the high-$\alpha$ regime.
 
 \paragraph{Note on pitching-moment normalisation.}
 The expression $M = C_{M}\bar{q}S$ in \eqref{eq:aero_loads} omits the
@@ -688,24 +727,57 @@ while the longitudinal states $\mathbf{x}=[V,\alpha,\gamma,q]^T$ are latent vari
 This distinction becomes more important as the observation rate is reduced. At 100 Hz the Nyquist frequency is 50 Hz, which is typically well above the dominant rigid-body longitudinal content of a small fixed-wing aircraft. At 10 Hz, representative of a slow GPS-like position stream, the Nyquist frequency falls to 5 Hz and derivative estimates become much more sensitive to filtering choices. At 2 Hz, the Nyquist frequency is only 1 Hz, so short-period or actuator-driven dynamics can be attenuated, aliased, or rendered practically unobservable from position and attitude alone. The lower-rate cases are therefore treated as observation-quality studies rather than changes to the aircraft dynamics.
 
 \subsection*{Benchmark Protocol}
-The current benchmark is organized around three complementary questions. First, under idealized state availability, how well do OEM, equation-error least squares, SINDy, PINN-style coefficient closure, UDE residual learning, and neural coefficient surrogates handle nominal-plus-hidden nonlinear aerodynamic terms? This oracle comparison isolates model-form error from state-reconstruction error. Second, under realistic motion-capture observation, how much performance is lost when the same methods are forced to use derived states, and how much can be recovered by fitting the measured position/attitude outputs directly? Third, when a hidden SAFE/AS3X-like loop reshapes elevator commands, can the methods distinguish missing aerodynamics from missing input dynamics?
+The current benchmark is organized around five complementary questions. First, under idealized state availability, how well do OEM, equation-error least squares, SINDy, PINN-style coefficient closure, UDE residual learning, and neural coefficient surrogates handle nominal-plus-hidden nonlinear aerodynamic terms? This oracle comparison isolates model-form error from state-reconstruction error. Second, under realistic motion-capture observation, how much performance is lost when the same methods are forced to use derived states, and how much can be recovered by fitting the measured position/attitude outputs directly? Third, when a hidden SAFE/AS3X-like loop reshapes elevator commands, can the methods distinguish missing aerodynamics from missing input dynamics? Fourth, when the maneuver deliberately drives larger angle-of-attack, pitch-rate, elevator, and speed excursions, do methods that look adequate on local trajectories still recover the nonlinear aerodynamic residuals? Fifth, when the training set spans a deliberately wider initial-condition distribution, does one global model remain adequate or does a stitched collection of local models improve extrapolation across operating regimes?
 
 For this reason the benchmark reports separate rows for direct-state and mocap-derived-state training where applicable. The direct-state case uses noisy measurements of $V,\alpha,\gamma,q$ and should be interpreted as an upper-bound diagnostic for algorithms that require state histories or state derivatives. The mocap-derived case uses $p_x,p_z,\theta$ sampled at 100 Hz and reconstructs $V,\alpha,\gamma,q$ by smoothing and finite differencing; this case is intentionally included because many practical pipelines use this preprocessing step, even though it is numerically fragile. The mocap-output OEM case instead keeps $V,\alpha,\gamma,q$ as latent states and optimizes the output error in $p_x,p_z,\theta$ using a CasADi/IPOPT nonlinear program. This is the preferred deterministic baseline for laboratory motion-capture data because it avoids differentiating the measured position and attitude channels.
 
 The observation-rate study decimates the same 100 Hz mocap stream to 10 Hz and 2 Hz before applying the state-reconstruction pipeline. This does not change the aircraft trajectory or aerodynamic model; it only changes the information available to the estimator. The resulting degradation quantifies the practical observability and sampling limitations imposed by slower sensors. As the observation rate approaches the dominant aircraft modes, Nyquist limitations and filtering tradeoffs become central rather than incidental implementation details.
+
+The local open-loop dataset intentionally remains a near-trim maneuver. It is
+included because small-amplitude identification is still a common aircraft
+SysID use case and because it provides a sanity check where global linear
+models should be competitive. The aggressive sine-sweep and aggressive
+nonlinear datasets use a stratified initial-condition sampler instead of a
+single Gaussian perturbation about trim. SAFE-off aggressive trials are drawn
+from local-trim, low-speed/high-$\alpha$, pull-up, recovery, and fast-dive
+bands: approximately $V\in[7.5,29]$ m/s,
+$\alpha\in[-5^\circ,20^\circ]$, $\gamma\in[-35^\circ,32^\circ]$, and
+$q\in[-95,90]^\circ$/s over the union of regimes. The validation split shifts
+some high-$\alpha$ bands upward to test interpolation and limited
+extrapolation. SAFE-on trials use a broad but recoverable subset of the same
+idea so that the hidden recovery loop can visibly suppress high-$\alpha$
+excursions. This design separates the question ``does a local linear model work
+near trim?'' from the harder question ``does one global model remain adequate
+across trim, stall onset, recovery, and speed variation?''
 
 \subsection*{Implemented Methods}
 Each method is run from the same generated train/validation splits. Unless stated
 otherwise, methods are given the external pilot command $\mathbf{u}_{\mathrm{cmd}}$
 and either direct noisy states or states reconstructed from 100 Hz motion capture.
 The validation score is always computed against the simulator truth and is not a
-training objective. Primary ranking figures and tables report open-loop model
-rollouts driven only by the supplied pilot-command history after
-initialization. Methods may use the validation initial condition. Lagged
-input-output methods initialize their required state history from that same
-initial condition and the pilot-command history rather than from additional
-validation measurements, so validation measurements are not fed back into the
-model after rollout begins.
+training objective. It is the mean normalized state RMSE over the validation
+rollout,
+\[
+J_{\mathrm{val}}
+=
+\frac{1}{4}\sum_{j=1}^{4}
+\frac{
+\sqrt{N^{-1}\sum_{i,k}
+\left(\hat{x}_{i,k,j}-x_{i,k,j}^{\mathrm{true}}\right)^2}
+}{
+\max_{i,k} x_{i,k,j}^{\mathrm{true}}
+-\min_{i,k} x_{i,k,j}^{\mathrm{true}}
+},
+\]
+with the denominator replaced by one only for numerically constant channels.
+Thus the score is dimensionless: it is not the RMSE of one state, but the
+average of the range-normalized RMSEs for $V,\alpha,\gamma$, and $q$. Primary
+ranking figures and tables report open-loop model rollouts driven only by the
+supplied pilot-command history after initialization. Methods may use the
+validation initial condition. Lagged input-output methods initialize their
+required state history from that same initial condition and the pilot-command
+history rather than from additional validation measurements, so validation
+measurements are not fed back into the model after rollout begins.
 
 \paragraph{Nominal model.}
 The nominal baseline propagates \eqref{eq:eom} using the nominal aerodynamic
@@ -748,13 +820,16 @@ $j\omega X(\omega)=AX(\omega)+BU(\omega)$. This is not CIFER; it is a compact
 spectral baseline with some of the same diagnostic ingredients. Its result
 should not be interpreted as a judgement of CIFER performance.
 
-\paragraph{Subspace, Koopman, and local linear models.}
+\paragraph{Subspace, Koopman, local linear, and stitched models.}
 The linear state-space baseline fits a one-step affine discrete model by least
 squares. The Hankel/SVD subspace baseline constructs lagged input/output blocks,
 projects them onto a low-dimensional latent basis, and fits linear latent
 dynamics. The Koopman-EDMD baseline uses the same nonlinear candidate functions
 as SINDy, but fits a lifted discrete-time one-step map rather than sparse
-continuous-time derivatives. These methods are included because they can be
+continuous-time derivatives. The model-stitching baseline clusters training
+trajectories by initial condition, fits multiple local affine state-space
+models, and blends their one-step predictions with smooth scheduling weights
+during validation. These methods are included because they can be
 strong predictors even when they do not recover physically meaningful
 aerodynamic parameters.
 
@@ -763,15 +838,12 @@ The SINDy row uses a structured sparse coefficient formulation. It regresses the
 EOM-inferred aerodynamic coefficients $C_L$, $C_D$, and $C_m$ on protected
 low-order aircraft terms plus a sparse residual library in one fit. Protected
 terms are always retained, while residual-library terms are selected by
-sequential thresholded least squares. The Integrated-SINDy row uses the same
-structured library but fits its coefficients by minimizing integrated trajectory
-output error with CasADi/IPOPT, making it closer to OEM and avoiding direct
-equation-error coefficient inversion. The stepwise symbolic baseline remains a
+sequential thresholded least squares. The stepwise symbolic baseline remains a
 black-box sparse derivative model. These sparse-library methods are sensitive
 to derivative quality, excitation, and to whether the library contains the true
 hidden mechanism. Saturations, rate limits, and recovery gates are especially
-hard because they appear only near boundaries unless the experiment
-deliberately visits those regions.
+hard because they appear only near
+boundaries unless the experiment deliberately visits those regions.
 
 \paragraph{PINN, UDE, GP/RBF, and neural surrogates.}
 The coefficient-closure PINN and UDE residual models keep the longitudinal
@@ -1009,7 +1081,61 @@ The local affine discrete state-space baseline solves
     [1,\hat{\mathbf{x}}_k^T,\mathbf{u}_k^T]\widehat{C}.
     \label{eq:code_linear_ss}
 \end{equation}
-This is \texttt{run\_linear\_state\_space}.
+Validation is then an open-loop rollout from the validation initial condition
+using only the supplied pilot-command history. The method therefore does not
+use validation measurements as feedback, but it also does not estimate
+aerodynamic derivatives or hidden-controller parameters. Low validation error
+for this row should be interpreted as strong in-distribution discrete
+prediction, not as physical interpretability. This is
+\texttt{run\_linear\_state\_space}.
+
+\paragraph{Model-Stitching.}
+The stitched local-model row first clusters training trajectories by their
+initial state $\mathbf{x}_{i,0}$. With $M$ local models, k-means assigns each
+training trajectory to a regime index $r_i\in\{1,\ldots,M\}$. For each regime,
+the code fits the same affine one-step model as \eqref{eq:code_linear_ss},
+\begin{equation}
+    \widehat{C}^{(m)}
+    =
+    \arg\min_C
+    \sum_{i:r_i=m}\sum_k
+    \left\|
+    \mathbf{x}_{i,k+1}
+    -
+    [1,\mathbf{x}_{i,k}^T,\mathbf{u}_{i,k}^T]C
+    \right\|_2^2
+    +\lambda\|C\|_F^2.
+    \label{eq:code_model_stitching_local}
+\end{equation}
+Each local model is associated with the mean state
+$\boldsymbol{\mu}^{(m)}$ of its assigned samples. During rollout, the local
+predictions
+\[
+    \hat{\mathbf{x}}_{k+1}^{(m)}
+    =
+    [1,\hat{\mathbf{x}}_k^T,\mathbf{u}_k^T]\widehat{C}^{(m)}
+\]
+are blended with normalized radial-basis scheduling weights
+\begin{align}
+    w_m(\hat{\mathbf{x}}_k)
+    &=
+    \frac{
+    \exp\left[-\frac{1}{2\ell^2}
+    \left\|S_x^{-1}(\hat{\mathbf{x}}_k-\boldsymbol{\mu}^{(m)})\right\|_2^2\right]
+    }{
+    \sum_j
+    \exp\left[-\frac{1}{2\ell^2}
+    \left\|S_x^{-1}(\hat{\mathbf{x}}_k-\boldsymbol{\mu}^{(j)})\right\|_2^2\right]
+    },\\
+    \hat{\mathbf{x}}_{k+1}
+    &= \sum_{m=1}^{M} w_m(\hat{\mathbf{x}}_k)\hat{\mathbf{x}}_{k+1}^{(m)}.
+    \label{eq:code_model_stitching}
+\end{align}
+The default implementation uses $M=6$, ridge $\lambda=10^{-7}$, and chooses
+the scheduling length scale $\ell$ from the median distance between local-model
+centers in normalized state space. Validation is an open-loop rollout from the
+validation initial condition using only the pilot-command history. This is
+\texttt{run\_model\_stitching}.
 
 \paragraph{Subspace-Hankel.}
 For a past window $p$, the code builds lagged features
@@ -1126,36 +1252,13 @@ initial condition and driven only by the pilot-command history. Thus SINDy is
 compared as a sparse aerodynamic-closure method rather than as an unconstrained
 black-box state-derivative model.
 
-The unique \texttt{Integrated-SINDy} row uses the same coefficient library but
-fits the coefficients through an output-error objective,
-\begin{equation}
-    \min_{\beta,\xi,\mathbf{x}_{0,i}}
-    \sum_{i,k}
-    \left\|
-    R^{-1/2}
-    \left(\mathbf{x}_{i,k}
-    -\mathbf{y}_{i,k}\right)
-    \right\|_2^2
-    +\lambda_1\sum_j \sqrt{\xi_j^2+\epsilon},
-    \qquad
-    \mathbf{x}_{i,k+1}
-    =
-    \Phi_{\mathrm{RK4}}(\mathbf{x}_{i,k},\mathbf{u}_{i,k};
-        \beta,\xi).
-    \label{eq:code_integrated_sindy}
-\end{equation}
-The protected $\beta$ coefficients and sparse residual $\xi$ coefficients are
-estimated simultaneously. This is more expensive than coefficient-inversion
-SINDy, but it is less tied to numerical differentiation and is conceptually
-closer to OEM.
 The stepwise symbolic baseline greedily adds terms that reduce
 \[
     \log(\mathrm{MSE})+
     \rho\,n_{\mathrm{terms}}\log(N)/N
 \]
 and then refits ridge coefficients on the selected support. These correspond to
-\texttt{fit\_sindy}, \texttt{run\_integrated\_sindy}, and
-\texttt{fit\_symbolic\_stepwise}.
+\texttt{fit\_sindy} and \texttt{fit\_symbolic\_stepwise}.
 
 \paragraph{UDE residual.}
 The UDE residual target is the measured derivative error relative to the
@@ -1330,18 +1433,19 @@ OEM-HiddenController &
 EKF-ParamID &
 \eqref{eq:code_ekf} &
 \texttt{make\_casadi\_rk4\_step\_parameter\_jacobian}, \texttt{run\_filter\_error\_ekf}. \\
-Linear and subspace models &
+Linear, stitched, and subspace models &
 \eqref{eq:code_linear_ss}--\eqref{eq:code_subspace} &
-\texttt{run\_linear\_state\_space}, \texttt{run\_subspace\_hankel}. \\
+\texttt{run\_linear\_state\_space}, \texttt{run\_model\_stitching},
+\texttt{run\_subspace\_hankel}. \\
 Koopman-EDMD &
 \eqref{eq:code_koopman_edmd} &
 \texttt{fit\_koopman\_edmd}, \texttt{run\_koopman\_edmd}. \\
 Frequency-Welch &
 \eqref{eq:code_frequency} &
 \texttt{fit\_frequency\_linear\_model}, \texttt{run\_frequency\_linear}. \\
-SINDy, Integrated-SINDy, and symbolic stepwise &
-\eqref{eq:code_sindy_library}, \eqref{eq:code_integrated_sindy} &
-\texttt{sindy\_library}, \texttt{fit\_sindy}, \texttt{run\_integrated\_sindy}, \texttt{fit\_symbolic\_stepwise}. \\
+SINDy and symbolic stepwise &
+\eqref{eq:code_sindy_library} &
+\texttt{sindy\_library}, \texttt{fit\_sindy}, \texttt{fit\_symbolic\_stepwise}. \\
 UDE, PINN closure, hidden-control neural rows &
 \eqref{eq:code_ude}--\eqref{eq:code_gp_closure} &
 \texttt{run\_ude}, \texttt{run\_pinn\_closure},
@@ -1371,16 +1475,86 @@ immediately but can be sensitive to measurement preprocessing.
     \label{fig:benchmark_problem_matrix}
 \end{figure}
 
+Figure~\ref{fig:benchmark_maneuver_overview} shows representative validation
+maneuvers for the benchmark datasets. For each dataset, the plotted trajectory
+is the validation trial with the largest absolute angle of attack, so the figure
+shows the intended excitation envelope rather than an arbitrary mild trial. The
+aggressive sine-sweep and aggressive nonlinear cases deliberately add large
+elevator pulses, throttle excursions, and high-$\alpha$ dwell segments to leave
+the near-trim region. The SAFE-on variants receive similarly aggressive pilot
+commands, but the hidden pitch/rate recovery logic reshapes the actuator input
+and suppresses much of the actual high-$\alpha$ response.
+
 \begin{figure}[!htbp]
     \centering
-    \includesvg[width=0.98\linewidth]{generated_method_score_heatmap}
-    \caption{Open-loop validation trajectory error by method and benchmark condition. Lower values are better. All ranked methods use validation measurements only for initialization and scoring, not for feedback during validation rollout.}
-    \label{fig:method_score_heatmap}
+    \includesvg[width=0.98\linewidth]{generated_benchmark_maneuver_overview}
+    \caption{Representative validation maneuvers. The path panel shows inertial motion-capture position $p_x$ versus $p_z$ after subtracting the initial position. The remaining panels show airspeed, angle of attack, pitch attitude, thrust command/realized input, and elevator command/realized input for the same trials. Dotted input traces are external pilot commands; solid or dashed traces are the actuator inputs that drive the plant.}
+    \label{fig:benchmark_maneuver_overview}
 \end{figure}
 
-For the direct-state case, the supervised coefficient surrogate gives the best score because it uses synthetic labels for the hidden aerodynamic residuals; it is therefore best interpreted as an upper-bound surrogate rather than a flight-data-only method. The UDE, PINN-style coefficient-closure, and GP/RBF coefficient-closure models test the flight-data-only version of the same idea: retain the rigid-body equations while learning missing force and moment closures from residuals. The Koopman-EDMD row tests a different surrogate role, namely a lifted one-step predictor with no aerodynamic parameter interpretation. The EKF-ParamID row uses filtering only during training; its validation score is a frozen-parameter open-loop rollout driven by the pilot command sequence.
+The current benchmark does not include full loops. The 3-DoF longitudinal model
+uses $V,\alpha,\gamma,q$ with a conventional small-disturbance-style flight-path
+angle envelope, and the simulator rejects trajectories outside
+$4\leq V\leq34$ m/s, $|\gamma|\leq1.20$ rad, $|\alpha|\leq0.75$ rad, and
+$|q|\leq3.50$ rad/s. These limits are deliberately wider than the nominal pylon
+racing envelope so that aggressive validation trajectories can include
+post-stall pull-ups, rapid pitch excursions, and steep climbs or descents. A
+true loop would require $\gamma$ and pitch attitude to pass through a full
+rotation, with wrapped attitude coordinates and an aerodynamic model valid for
+inverted, post-stall, and possibly negative-lift flight. That would be a useful
+future stress case, but it should be treated as a separate aerobatic benchmark
+rather than mixed into the present indoor trainer identification study.
 
-The mocap-derived comparison shows a different ranking. Methods that depend strongly on differentiated states, especially equation-error, SINDy, GP/RBF coefficient closure, PINN-style closure, UDE residual learning, and the compact Frequency-Welch baseline, degrade when reconstructed $V,\alpha,\gamma,q$ inherit numerical differentiation noise and smoothing lag from position and attitude. Open-loop grey-box and learned-residual models expose the cost of using reconstructed states as if they were direct aerodynamic measurements. This is precisely the practical issue motivating mocap-output OEM and latent-state filter or variational formulations.
+\begin{figure}[!htbp]
+    \centering
+    \includesvg[width=0.98\linewidth]{generated_method_score_heatmap_direct}
+    \caption{Direct-state open-loop validation trajectory error by method and benchmark condition. Lower values are better. All ranked methods use validation measurements only for initialization and scoring, not for feedback during validation rollout. The leftmost column gives the per-method mean score across the direct-state benchmark conditions.}
+    \label{fig:method_score_heatmap_direct}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \includesvg[width=0.98\linewidth]{generated_method_score_heatmap_mocap}
+    \caption{Motion-capture-derived open-loop validation trajectory error by method and benchmark condition. Lower values are better. The leftmost column gives the per-method mean score across the mocap-derived benchmark conditions, separating the measurement-reconstruction problem from the direct-state comparison in Fig.~\ref{fig:method_score_heatmap_direct}.}
+    \label{fig:method_score_heatmap_mocap}
+\end{figure}
+
+For the direct-state case, the supervised coefficient surrogate gives the best
+score because it uses synthetic labels for the hidden aerodynamic residuals; it
+is therefore best interpreted as an upper-bound surrogate rather than a
+flight-data-only method. The UDE, PINN-style coefficient-closure, and GP/RBF
+coefficient-closure models test the flight-data-only version of the same idea:
+retain the rigid-body equations while learning missing force and moment closures
+from residuals. This ranking now changes as intended with maneuver severity.
+In the near-trim open-loop direct-state case, many predictors work well and
+Linear-SS remains a reasonable local model ($J_{\mathrm{val}}\approx0.041$).
+In the aggressive direct-state case, the learned aerodynamic-residual family
+separates from the global linear model: the supervised coefficient surrogate,
+UDE residual, and PINN-style coefficient closure obtain
+$J_{\mathrm{val}}\approx0.022$, $0.026$, and $0.028$, respectively, while
+Linear-SS is about $0.19$. Thus the aggressive benchmark no longer supports the
+interpretation that a single global affine state-space model is sufficient once
+the validation set spans stall onset, recovery, and speed variation. The
+Koopman-EDMD row tests a different surrogate role, namely a lifted one-step
+predictor with no aerodynamic parameter interpretation. The EKF-ParamID row
+uses filtering only during training; its validation score is a frozen-parameter
+open-loop rollout driven by the pilot command sequence.
+
+The mocap-derived comparison shows a different ranking. Methods that depend
+strongly on differentiated states, especially equation-error, SINDy, GP/RBF
+coefficient closure, PINN-style closure, UDE residual learning, and the compact
+Frequency-Welch baseline, degrade when reconstructed $V,\alpha,\gamma,q$
+inherit numerical differentiation noise and smoothing lag from position and
+attitude. In the aggressive mocap-derived case, EKF-ParamID, mocap-output OEM,
+OEM-SS, and Linear-SS cluster in the range
+$J_{\mathrm{val}}\approx0.13$--$0.20$, while several nonlinear residual methods
+that were strongest with direct states are no longer dominant. This should not
+be read as evidence that the aircraft is globally linear; rather, it indicates
+that the preprocessing pipeline has become the bottleneck and can hide the value
+of nonlinear aerodynamic closures. Open-loop grey-box and learned-residual
+models expose the cost of using reconstructed states as if they were direct
+aerodynamic measurements. This is precisely the practical issue motivating
+mocap-output OEM and latent-state filter or variational formulations.
 
 Tables~\ref{tab:open_loop_shared_method_comparison_direct} and
 \ref{tab:open_loop_safe_shared_method_comparison_direct} isolate the SAFE-off
@@ -1391,6 +1565,28 @@ SAFE-on case, the same observed pilot command is additionally passed through the
 hidden pitch-attitude/rate loop in \eqref{eq:safe_loop}. This comparison is the
 closest numerical analog to flying the off-the-shelf aircraft with the
 proprietary stabilizer disabled or enabled.
+
+The aggressive nonlinear maneuver is a separate stress case rather than a
+replacement for the local open-loop maneuver. It adds faster elevator doublets,
+larger pull-up and pushover pulses, and dedicated high-$\alpha$ stall probes
+with long elevator holds. Its purpose is to leave the near-trim region where the
+coded nonlinear aerodynamic residuals can be approximated by a local affine
+model and to force the SAFE-off validation set through the lift-rolloff and
+drag-rise portion of the hidden RC-aircraft polar. The resulting ranking is
+therefore a test of nonlinear aerodynamic recovery and extrapolation, not only
+of short-horizon in-distribution trajectory prediction.
+
+The SAFE-on aggressive and recovery-probe cases add a second effect: the
+external pilot command is no longer the input that directly drives the plant.
+For direct-state validation, PINN-style coefficient closure, UDE residual
+learning, Koopman-EDMD, and model stitching all improve substantially over the
+nominal model, while Linear-SS remains a useful but not leading local predictor.
+For mocap-derived SAFE-on validation, the hidden-controller OEM and OEM-SS rows
+become more competitive because they either include an oracle hidden-controller
+structure or optimize latent trajectories against the measured outputs. This is
+consistent with the practical interpretation of SAFE-on data: without a model of
+the hidden elevator reshaping, an estimator can easily attribute controller
+action to aerodynamic residuals.
 
 \begin{figure}[!htbp]
     \centering
@@ -1412,21 +1608,39 @@ rate limits, and panic/recovery gates are difficult to identify unless the test
 data visit those regions, and their absence from ordinary lap data can make the
 controller appear as ordinary aerodynamic or actuator model error.
 
-Figure~\ref{fig:shared_train_time_accuracy_tradeoff} places the same results on a cost-error plot. The horizontal axis reports training or nonlinear-solve wall time, while the vertical axis reports the normalized validation trajectory error score; lower vertical position is better. The detailed appendix tables also report process CPU time, CUDA event training time, and peak CUDA memory for PyTorch rows when a GPU is used. This distinction matters when runs are parallelized: wall time measures user wait time, CPU time measures host work consumed by each process, and GPU event time isolates the neural training kernels. In the direct-state case, neural residual and coefficient-closure approaches achieve low error with short GPU training time, whereas CasADi/IPOPT OEM and Integrated-SINDy methods spend more time in nonlinear optimization. In the mocap-derived case, the dominant issue is no longer training cost but measurement preprocessing: several fast derivative-based methods become inaccurate because the reconstructed aerodynamic states are poor dependent variables.
+Figure~\ref{fig:shared_train_time_accuracy_tradeoff} places the same results on a cost-error plot. The horizontal axis reports training or nonlinear-solve wall time, while the vertical axis reports $J_{\mathrm{val}}$, the mean normalized state RMSE defined above; lower vertical position is better. The detailed appendix tables also report process CPU time, CUDA event training time, and peak CUDA memory for PyTorch rows when a GPU is used. This distinction matters when runs are parallelized: wall time measures user wait time, CPU time measures host work consumed by each process, and GPU event time isolates the neural training kernels. In the direct-state case, neural residual and coefficient-closure approaches achieve low error with short GPU training time, whereas CasADi/IPOPT OEM methods spend more time in nonlinear optimization. In the mocap-derived case, the dominant issue is no longer training cost but measurement preprocessing: several fast derivative-based methods become inaccurate because the reconstructed aerodynamic states are poor dependent variables.
 
 \begin{figure}[H]
     \centering
     \includesvg[width=0.98\linewidth]{generated_shared_train_time_accuracy_tradeoff}
-    \caption{Training-time versus validation-error tradeoff for each open-loop benchmark method. Marker area increases with validation rollout time. Lower vertical position means lower trajectory error and therefore better validation performance.}
+    \caption{Training-time versus validation-error tradeoff for the near-trim open-loop benchmark. The vertical axis is $J_{\mathrm{val}}$, the mean of the range-normalized RMSEs for $V,\alpha,\gamma$, and $q$ over all validation samples. Marker area increases with validation rollout time. The red dashed horizontal line gives the nominal-model baseline, which has no fitted training solve. Lower vertical position means lower trajectory error and therefore better validation performance.}
     \label{fig:shared_train_time_accuracy_tradeoff}
 \end{figure}
+
+\IfFileExists{fig/generated_aggressive_shared_train_time_accuracy_tradeoff.svg}{%
+\begin{figure}[H]
+    \centering
+    \includesvg[width=0.98\linewidth]{generated_aggressive_shared_train_time_accuracy_tradeoff}
+    \caption{Training-time versus validation-error tradeoff for the aggressive nonlinear benchmark. This case uses stratified initial conditions and larger elevator/throttle excitation to drive stall onset, drag rise, speed variation, pull-up, and recovery regimes. It should be interpreted as the primary nonlinear aerodynamic stress test, while Fig.~\ref{fig:shared_train_time_accuracy_tradeoff} is the local near-trim comparison.}
+    \label{fig:aggressive_train_time_accuracy_tradeoff}
+\end{figure}
+}{}
+
+\IfFileExists{fig/generated_aggressive_safe_shared_train_time_accuracy_tradeoff.svg}{%
+\begin{figure}[H]
+    \centering
+    \includesvg[width=0.98\linewidth]{generated_aggressive_safe_shared_train_time_accuracy_tradeoff}
+    \caption{Training-time versus validation-error tradeoff for the aggressive benchmark with the hidden SAFE-like controller enabled. The estimator receives the same external pilot-command channel, while the simulator is driven by an internally reshaped elevator command. This figure isolates the combined effect of nonlinear aerodynamics and unknown closed-loop input dynamics.}
+    \label{fig:aggressive_safe_train_time_accuracy_tradeoff}
+\end{figure}
+}{}
 
 Figure~\ref{fig:shared_validation_score_comparison} shows the same validation scores as a ranked log-scale score plot split by measurement assumption.
 
 \begin{figure}[!htbp]
     \centering
     \includesvg[width=0.98\linewidth]{generated_shared_validation_score_comparison}
-    \caption{Open-loop validation trajectory score for the shared 3-DoF longitudinal benchmark. Lower is better. Direct-state rows use simulated noisy $V,\alpha,\gamma,q$ measurements; mocap rows use states reconstructed from 100 Hz position and attitude measurements.}
+    \caption{Open-loop validation trajectory score for the shared 3-DoF longitudinal benchmark. The score is the mean state NRMSE $J_{\mathrm{val}}$, so lower is better. Direct-state rows use simulated noisy $V,\alpha,\gamma,q$ measurements; mocap rows use states reconstructed from 100 Hz position and attitude measurements.}
     \label{fig:shared_validation_score_comparison}
 \end{figure}
 
@@ -1865,17 +2079,31 @@ GP/RBF coefficient closures when a kernel surrogate with smoother interpolation
 and an eventual path to posterior uncertainty is preferred over a neural
 closure. Use Koopman-EDMD, subspace, or other lifted/input-output surrogates
 when predictive accuracy over the tested envelope is more important than
-recovering aerodynamic parameters. Use
+recovering aerodynamic parameters. Use local model stitching or LPV-style
+scheduling when separate parts of the flight envelope are well represented by
+simple models but one global model averages incompatible trim, stall-onset, and
+recovery behavior. Use
 hidden-input models when a proprietary autopilot reshapes commands. Use
 frequency-domain tools when the experiment has been designed for spectral
 identification. The value of the benchmark is that each method is exposed to
 the same train/validation splits across these regimes, so these recommendations
 can be revised quantitatively as additional methods and datasets are added.
 
+The updated aggressive results also clarify the role of simple linear models.
+Linear-SS is not invalid; it is an effective local predictor for small motions
+and can remain competitive when mocap-derived state reconstruction dominates
+the error budget. It should not, however, be interpreted as recovering the
+nonlinear aerodynamics. When direct states expose the stall and recovery
+regimes, the nonlinear closure and residual-learning methods give substantially
+lower validation error. This is the intended benchmark behavior: near-trim tests
+verify that simple models are not unfairly penalized, while aggressive
+initial-condition and maneuver variation reveal when global linearity is no
+longer adequate.
+
 \section{Future Work}
 Traditional neural networks, being fully black-box models, lack physical meaning and are therefore difficult to certify for safety-critical flight applications. Recent advances in sparse, kernel, lifted-linear, and physics-constrained learning can help overcome this limitation. Integrating interpretable nonlinear system identification frameworks, such as Sparse Identification of Nonlinear Dynamics (SINDy), symbolic regression, GP/Kriging coefficient closures, Koopman-EDMD, flight-dynamics-level PINNs, and UDE residual models with control design represents an important future research direction. These approaches can uncover latent dynamics and nonlinear dependencies that are not captured by classical parametric structures.
 
-The benchmark still does not fully represent every mature nonlinear system-identification family. In particular, a dedicated NARX/NARMAX, Volterra, and Hammerstein-Wiener comparison would be useful for the input-output prediction problem, especially when only motion-capture outputs and pilot commands are trusted. Those methods are adjacent to the subspace and Koopman rows included here, but they require a separate lag/order/structure-selection study to be fair.
+The benchmark still does not fully represent every mature nonlinear system-identification family. In particular, a dedicated NARX/NARMAX, Volterra, and Hammerstein-Wiener comparison would be useful for the input-output prediction problem, especially when only motion-capture outputs and pilot commands are trusted. Those methods are adjacent to the subspace and Koopman rows included here, but they require a separate lag/order/structure-selection study to be fair. The model-stitching row added here is also only a first local-model baseline: a fair LPV, mixture-of-experts, or multi-regime GP-SSM study would need explicit scheduling-variable selection, continuity constraints at regime boundaries, and uncertainty treatment for regime assignment.
 
 A separate high-fidelity path is possible when detailed geometry, flow-field data, and CFD solvers are available. In that setting, PINNs or neural operators could be used to build aerodynamic surrogate models constrained by the Euler, RANS, or Navier-Stokes equations together with boundary and far-field conditions. The surrogate could then provide force and moment closures for a 3-DoF or 6-DoF flight-dynamics model. This route is closer to CFD-based surrogate modeling than to classical flight-test system identification, so it is outside the scope of the present comparison but is an important direction for unsteady and strongly nonlinear aerodynamic regimes.
 
@@ -1934,6 +2162,20 @@ measurements. Lower validation score is better.
 }{}
 \IfFileExists{generated/sine_sweep_safe_shared_method_comparison_mocap_table.tex}{%
 \input{generated/sine_sweep_safe_shared_method_comparison_mocap_table}
+}{}
+
+\subsection{Aggressive Nonlinear Maneuver Cases}
+\IfFileExists{generated/aggressive_shared_method_comparison_direct_table.tex}{%
+\input{generated/aggressive_shared_method_comparison_direct_table}
+}{}
+\IfFileExists{generated/aggressive_shared_method_comparison_mocap_table.tex}{%
+\input{generated/aggressive_shared_method_comparison_mocap_table}
+}{}
+\IfFileExists{generated/aggressive_safe_shared_method_comparison_direct_table.tex}{%
+\input{generated/aggressive_safe_shared_method_comparison_direct_table}
+}{}
+\IfFileExists{generated/aggressive_safe_shared_method_comparison_mocap_table.tex}{%
+\input{generated/aggressive_safe_shared_method_comparison_mocap_table}
 }{}
 
 \section{Observation-Rate and UQ Tables}

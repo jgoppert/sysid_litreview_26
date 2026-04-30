@@ -23,22 +23,57 @@ METHOD_RESULTS = METHODS / "results"
 METHOD_FIG = METHODS / "fig"
 LATEX_GENERATED = LATEX / "generated"
 LATEX_FIG = LATEX / "fig"
-DATASET_MODES = ("open_loop", "sine_sweep", "open_loop_safe", "sine_sweep_safe", "safe_loop")
+DATASET_MODES = ("open_loop", "sine_sweep", "aggressive", "open_loop_safe", "sine_sweep_safe", "aggressive_safe", "safe_loop")
 DATASET_OUTPUTS = {
     "open_loop": METHODS / "data" / "longitudinal_3dof_nonlinear_open_loop",
     "sine_sweep": METHODS / "data" / "longitudinal_3dof_nonlinear_sine_sweep",
+    "aggressive": METHODS / "data" / "longitudinal_3dof_nonlinear_aggressive",
     "open_loop_safe": METHODS / "data" / "longitudinal_3dof_nonlinear_open_loop_safe",
     "sine_sweep_safe": METHODS / "data" / "longitudinal_3dof_nonlinear_sine_sweep_safe",
+    "aggressive_safe": METHODS / "data" / "longitudinal_3dof_nonlinear_aggressive_safe",
     "safe_loop": METHODS / "data" / "longitudinal_3dof_nonlinear_safe_loop",
     "proprietary_autopilot": METHODS / "data" / "longitudinal_3dof_nonlinear_proprietary_autopilot",
 }
 DATASET_TITLES = {
     "open_loop": "Open-loop maneuver",
-    "sine_sweep": "Open-loop sine-sweep",
+    "sine_sweep": "Aggressive sine-sweep maneuver",
+    "aggressive": "Aggressive nonlinear maneuver",
     "open_loop_safe": "Open-loop maneuver with SAFE enabled",
-    "sine_sweep_safe": "Sine-sweep maneuver with SAFE enabled",
-    "safe_loop": "SAFE recovery-probe maneuver",
+    "sine_sweep_safe": "Aggressive sine-sweep with SAFE enabled",
+    "aggressive_safe": "Aggressive maneuver with SAFE enabled",
+    "safe_loop": "Aggressive SAFE recovery-probe maneuver",
     "proprietary_autopilot": "Hidden-controller maneuver",
+}
+METHOD_WORKERS = (
+    "Nominal",
+    "Linear-SS",
+    "Model-Stitching",
+    "Koopman-EDMD",
+    "Subspace-Hankel",
+    "Frequency-Welch",
+    "EquationError-LS",
+    "EKF-ParamID",
+    "Fisher-UQ",
+    "OEM-SS",
+    "OEM-MocapOutput",
+    "Variational-Mocap",
+    "OEM-HiddenController",
+    "SINDy",
+    "Symbolic-Stepwise",
+    "GP-CoeffClosure",
+    "UDE-Residual",
+    "PINN-CoeffClosure",
+    "UDE-HiddenControl",
+    "PINN-HiddenElevator",
+    "NN-CoeffSurrogate",
+)
+HEAVY_METHOD_WORKERS: set[str] = set()
+GPU_METHOD_WORKERS = {
+    "UDE-Residual",
+    "PINN-CoeffClosure",
+    "UDE-HiddenControl",
+    "PINN-HiddenElevator",
+    "NN-CoeffSurrogate",
 }
 
 FIGURE_EXPORTS = {
@@ -63,6 +98,8 @@ ARCHIVED_RESULTS = [
     "shared_sindy_coefficients.csv",
     "shared_symbolic_coefficients.csv",
 ]
+LATEX_GENERATED_PATTERNS = ("*.tex",)
+LATEX_GENERATED_FIGURE_PATTERNS = ("generated_*",)
 
 
 def methods_python() -> str:
@@ -183,10 +220,57 @@ def available_archived_modes() -> list[str]:
     return [mode for mode in DATASET_MODES if archived_path(mode, "shared_method_comparison.csv", METHOD_RESULTS).exists()]
 
 
+def remove_matching(directory: Path, patterns: tuple[str, ...]) -> int:
+    if not directory.exists():
+        return 0
+    removed = 0
+    for pattern in patterns:
+        for path in directory.glob(pattern):
+            if path.is_file() or path.is_symlink():
+                path.unlink()
+                removed += 1
+    return removed
+
+
+def clean_latex_generated_assets() -> None:
+    removed_tables = remove_matching(LATEX_GENERATED, LATEX_GENERATED_PATTERNS)
+    removed_figures = remove_matching(LATEX_FIG, LATEX_GENERATED_FIGURE_PATTERNS)
+    if removed_tables or removed_figures:
+        print(f"Removed {removed_tables} generated LaTeX tables and {removed_figures} generated LaTeX figure files")
+
+
+def clean_suite_artifacts(modes: list[str] | tuple[str, ...]) -> None:
+    removed = 0
+    for mode in modes:
+        for filename in ARCHIVED_RESULTS:
+            for directory in (METHOD_RESULTS, METHODS / "tables"):
+                path = archived_path(mode, filename, directory)
+                if path.exists():
+                    path.unlink()
+                    removed += 1
+        for filename in ARCHIVED_FIGURES:
+            for suffix in (".svg", ".png"):
+                path = METHOD_FIG / f"{mode}_{Path(filename).with_suffix(suffix).name}"
+                if path.exists():
+                    path.unlink()
+                    removed += 1
+    for filename in ARCHIVED_RESULTS:
+        for directory in (METHOD_RESULTS, METHODS / "tables"):
+            path = directory / filename
+            if path.exists():
+                path.unlink()
+                removed += 1
+    for filename in ARCHIVED_FIGURES:
+        for suffix in (".svg", ".png"):
+            path = METHOD_FIG / Path(filename).with_suffix(suffix).name
+            if path.exists():
+                path.unlink()
+                removed += 1
+    if removed:
+        print(f"Removed {removed} stale suite result artifacts before regeneration", flush=True)
+
+
 def shared_results_path() -> Path:
-    latest_safe = archived_path("safe_loop", "shared_method_comparison.csv", METHOD_RESULTS)
-    if latest_safe.exists():
-        return latest_safe
     archived = archived_path("open_loop", "shared_method_comparison.csv", METHOD_RESULTS)
     return archived if archived.exists() else METHOD_RESULTS / "shared_method_comparison.csv"
 
@@ -317,7 +401,7 @@ def tradeoff_label(name: str, source: str) -> str:
         "Variational-Mocap": "Variational",
         "Subspace-Hankel": "Subspace",
         "Koopman-EDMD": "EDMD",
-        "Integrated-SINDy": "Int-SINDy",
+        "Model-Stitching": "Stitching",
     }
     return aliases.get(clean_method_name(name, source), clean_method_name(name, source))
 
@@ -332,7 +416,7 @@ def spread_log_labels(
     log_x_min, log_x_max = np.log10(x_limits)
     log_y_min, log_y_max = np.log10(y_limits)
     x_mid = 0.5 * (log_x_min + log_x_max)
-    min_sep = 0.105 * max(log_y_max - log_y_min, 1.0)
+    min_sep = 0.045 * max(log_y_max - log_y_min, 1.0)
     placed: list[tuple[float, float, str, float, float]] = []
     for side in (-1, 1):
         side_points = [
@@ -343,9 +427,11 @@ def spread_log_labels(
         side_points.sort(key=lambda item: item[1])
         previous_y = log_y_min - min_sep
         for log_x, log_y, label, x, y in side_points:
-            label_y = min(max(log_y + 0.025, previous_y + min_sep), log_y_max - 0.025)
+            near_top = log_y > log_y_max - 0.18 * (log_y_max - log_y_min)
+            preferred_y = log_y - 0.055 if near_top else log_y + 0.035
+            label_y = min(max(preferred_y, previous_y + min_sep), log_y_max - 0.04)
             previous_y = label_y
-            horizontal_offset = 0.055 * (log_x_max - log_x_min)
+            horizontal_offset = 0.075 * (log_x_max - log_x_min)
             label_x = np.clip(log_x + side * horizontal_offset, log_x_min + 0.02, log_x_max - 0.02)
             placed.append((10**label_x, 10**label_y, label, x, y))
     return placed
@@ -366,19 +452,35 @@ def plot_train_time_accuracy() -> None:
         for row in rows
         if row.get("state_source") in {"direct", "mocap"}
     ]
-    y_limits = (max(min(all_scores) * 0.45, 6e-3), max(all_scores) * 2.0)
+    y_limits = (max(min(all_scores) * 0.45, 6e-3), max(all_scores) * 4.0)
     for ax, (source, title, color) in zip(axes, groups):
         group_rows = sorted(
             [row for row in rows if row.get("state_source") == source and is_open_loop_model_row(row)],
             key=lambda row: float(row["validation_score"]),
         )
+        nominal_rows = [row for row in group_rows if clean_method_name(row["method"], source) == "Nominal"]
+        if nominal_rows:
+            nominal_score = max(float(nominal_rows[0]["validation_score"]), 1e-4)
+            ax.axhline(nominal_score, color="#d62728", linewidth=1.05, linestyle="--", alpha=0.85)
+            ax.text(
+                0.985,
+                nominal_score,
+                "Nominal",
+                transform=ax.get_yaxis_transform(),
+                ha="right",
+                va="bottom",
+                fontsize=6.4,
+                color="#9d1f1f",
+                bbox={"boxstyle": "round,pad=0.08", "facecolor": "white", "edgecolor": "none", "alpha": 0.75},
+            )
+        group_rows = [row for row in group_rows if clean_method_name(row["method"], source) != "Nominal"]
         x = [max(float(row["train_elapsed_s"]), 1e-3) for row in group_rows]
         y = [max(float(row["validation_score"]), 1e-4) for row in group_rows]
         sizes = [42.0 + 18.0 * min(float(row["rollout_elapsed_s"]), 12.0) for row in group_rows]
         ax.scatter(x, y, s=sizes, color=color, alpha=0.72, edgecolor="black", linewidth=0.45)
         ax.set_xscale("log")
         ax.set_yscale("log")
-        x_limits = (max(min(x) * 0.55, 5e-4), max(x) * 1.8)
+        x_limits = (max(min(x) * 0.55, 5e-4), max(x) * 2.4)
         ax.set_xlim(*x_limits)
         ax.set_ylim(*y_limits)
         label_points = [(xi, yi, tradeoff_label(row["method"], source)) for row, xi, yi in zip(group_rows, x, y)]
@@ -388,7 +490,7 @@ def plot_train_time_accuracy() -> None:
                 xy=(xi, yi),
                 xytext=(label_x, label_y),
                 textcoords="data",
-                fontsize=6.5,
+                fontsize=6.1,
                 alpha=0.92,
                 arrowprops={"arrowstyle": "-", "color": "0.45", "linewidth": 0.35, "alpha": 0.55},
                 bbox={"boxstyle": "round,pad=0.12", "facecolor": "white", "edgecolor": "none", "alpha": 0.72},
@@ -406,8 +508,8 @@ def plot_train_time_accuracy() -> None:
             bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "edgecolor": "0.75", "alpha": 0.9},
         )
         ax.grid(True, which="both", alpha=0.25)
-    axes[0].set_ylabel("validation trajectory error score")
-    fig.suptitle("Cost-error tradeoff by method")
+    axes[0].set_ylabel("validation score: mean state NRMSE")
+    fig.suptitle("Near-trim open-loop cost-error tradeoff")
     fig.tight_layout()
     output = METHOD_FIG / "shared_train_time_accuracy_tradeoff.svg"
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -461,8 +563,8 @@ def plot_validation_score_comparison() -> None:
             fontsize=8.5,
             bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "edgecolor": "0.75", "alpha": 0.9},
         )
-    axes[0].set_xlabel("validation trajectory error score")
-    axes[1].set_xlabel("validation trajectory error score")
+    axes[0].set_xlabel("validation score: mean state NRMSE")
+    axes[1].set_xlabel("validation score: mean state NRMSE")
     fig.suptitle("Validation score by method and measurement assumption")
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     output = METHOD_FIG / "shared_validation_score_comparison.svg"
@@ -480,19 +582,57 @@ def plot_archived_train_time_accuracy(mode: str, rows: list[dict[str, str]]) -> 
         ("mocap", "Mocap-derived states", "#f58518"),
     ]
     fig, axes = plt.subplots(1, 2, figsize=(10.2, 4.8), sharey=True)
+    all_scores = [
+        max(float(row["validation_score"]), 1e-4)
+        for row in rows
+        if row.get("state_source") in {"direct", "mocap"} and is_open_loop_model_row(row)
+    ]
+    y_limits = (max(min(all_scores) * 0.45, 6e-3), max(all_scores) * 4.0) if all_scores else (1e-2, 1.0)
     for ax, (source, title, color) in zip(axes, groups):
         group_rows = sorted(
-            [row for row in rows if row.get("state_source") == source],
+            [row for row in rows if row.get("state_source") == source and is_open_loop_model_row(row)],
             key=lambda row: float(row["validation_score"]),
         )
+        if not group_rows:
+            ax.set_axis_off()
+            continue
+        nominal_rows = [row for row in group_rows if clean_method_name(row["method"], source) == "Nominal"]
+        if nominal_rows:
+            nominal_score = max(float(nominal_rows[0]["validation_score"]), 1e-4)
+            ax.axhline(nominal_score, color="#d62728", linewidth=1.0, linestyle="--", alpha=0.85)
+            ax.text(
+                0.985,
+                nominal_score,
+                "Nominal",
+                transform=ax.get_yaxis_transform(),
+                ha="right",
+                va="bottom",
+                fontsize=6.2,
+                color="#9d1f1f",
+                bbox={"boxstyle": "round,pad=0.08", "facecolor": "white", "edgecolor": "none", "alpha": 0.75},
+            )
+        group_rows = [row for row in group_rows if clean_method_name(row["method"], source) != "Nominal"]
         x = [max(float(row["train_elapsed_s"]), 1e-3) for row in group_rows]
         y = [max(float(row["validation_score"]), 1e-4) for row in group_rows]
         sizes = [42.0 + 18.0 * min(float(row["rollout_elapsed_s"]), 12.0) for row in group_rows]
         ax.scatter(x, y, s=sizes, color=color, alpha=0.72, edgecolor="black", linewidth=0.45)
-        for row, xi, yi in zip(group_rows, x, y):
-            ax.annotate(clean_method_name(row["method"], source), (xi, yi), xytext=(4, 3), textcoords="offset points", fontsize=6.8)
         ax.set_xscale("log")
         ax.set_yscale("log")
+        x_limits = (max(min(x) * 0.55, 5e-4), max(x) * 2.4)
+        ax.set_xlim(*x_limits)
+        ax.set_ylim(*y_limits)
+        label_points = [(xi, yi, tradeoff_label(row["method"], source)) for row, xi, yi in zip(group_rows, x, y)]
+        for label_x, label_y, label, xi, yi in spread_log_labels(label_points, x_limits, y_limits):
+            ax.annotate(
+                label,
+                xy=(xi, yi),
+                xytext=(label_x, label_y),
+                textcoords="data",
+                fontsize=5.9,
+                alpha=0.92,
+                arrowprops={"arrowstyle": "-", "color": "0.45", "linewidth": 0.32, "alpha": 0.5},
+                bbox={"boxstyle": "round,pad=0.1", "facecolor": "white", "edgecolor": "none", "alpha": 0.72},
+            )
         ax.set_title(title)
         ax.set_xlabel("training / solve time [s]")
         ax.text(
@@ -506,7 +646,7 @@ def plot_archived_train_time_accuracy(mode: str, rows: list[dict[str, str]]) -> 
             bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "edgecolor": "0.75", "alpha": 0.9},
         )
         ax.grid(True, which="both", alpha=0.25)
-    axes[0].set_ylabel("validation trajectory error score")
+    axes[0].set_ylabel("validation score: mean state NRMSE")
     fig.suptitle(f"{DATASET_TITLES[mode]} cost-error tradeoff")
     fig.tight_layout()
     output = METHOD_FIG / f"{mode}_shared_train_time_accuracy_tradeoff.svg"
@@ -537,7 +677,7 @@ def plot_dataset_score_panels() -> None:
         colors = ["#e45756" if method in {"Frequency-LS", "Frequency-CIFER", "Frequency-Welch"} else "#4c78a8" for method in methods]
         ax.bar(range(len(methods)), scores, color=colors)
         ax.set_yscale("log")
-        ax.set_ylabel("error score")
+        ax.set_ylabel("mean state NRMSE")
         ax.set_title(f"{DATASET_TITLES[mode]} direct-state validation")
         ax.set_xticks(range(len(methods)))
         ax.set_xticklabels(methods, rotation=28, ha="right", fontsize=7.0)
@@ -548,6 +688,130 @@ def plot_dataset_score_panels() -> None:
     fig.savefig(output, bbox_inches="tight")
     fig.savefig(output.with_suffix(".png"), dpi=220, bbox_inches="tight")
     plt.close(fig)
+
+
+def plot_maneuver_overview() -> None:
+    import matplotlib.pyplot as plt
+
+    modes = [mode for mode in DATASET_MODES if (DATASET_OUTPUTS[mode] / "validation.npz").exists()]
+    if not modes:
+        return
+    colors = {
+        "open_loop": "#4c78a8",
+        "sine_sweep": "#59a14f",
+        "aggressive": "#e45756",
+        "open_loop_safe": "#9ecae9",
+        "sine_sweep_safe": "#8cd17d",
+        "aggressive_safe": "#ff9da6",
+        "safe_loop": "#f58518",
+    }
+    fig, axes = plt.subplots(3, 2, figsize=(11.4, 9.0), constrained_layout=True)
+    ax_path = axes[0, 0]
+    ax_speed = axes[0, 1]
+    ax_alpha = axes[1, 0]
+    ax_throttle = axes[1, 1]
+    ax_theta = axes[2, 0]
+    ax_elevator = axes[2, 1]
+    summary_rows: list[tuple[str, float, float, float, float, float]] = []
+    for mode in modes:
+        data = np.load(DATASET_OUTPUTS[mode] / "validation.npz")
+        t = data["t"]
+        x_true = data["x_true"]
+        mocap = data["mocap_true"]
+        u_cmd = data["u_cmd"]
+        u_act = data["u_act"]
+        alpha = x_true[:, :, 1]
+        trial_idx = int(np.argmax(np.max(np.abs(alpha), axis=1)))
+        path = mocap[trial_idx].copy()
+        path[:, 0] -= path[0, 0]
+        path[:, 1] -= path[0, 1]
+        state = x_true[trial_idx]
+        theta = state[:, 1] + state[:, 2]
+        thrust_cmd = u_cmd[trial_idx, :, 0]
+        thrust_act = u_act[trial_idx, :, 0]
+        elevator_cmd = u_cmd[trial_idx, :, 1]
+        elevator_act = u_act[trial_idx, :, 1]
+        color = colors.get(mode, None)
+        label = DATASET_TITLES[mode]
+        safe_mode = mode.endswith("_safe") or mode in {"safe_loop", "proprietary_autopilot"}
+        linestyle = "--" if safe_mode else "-"
+
+        ax_path.plot(path[:, 0], path[:, 1], color=color, linestyle=linestyle, linewidth=1.25, label=label)
+        ax_speed.plot(t, state[:, 0], color=color, linestyle=linestyle, linewidth=1.0)
+        ax_alpha.plot(t, np.rad2deg(state[:, 1]), color=color, linestyle=linestyle, linewidth=1.0)
+        ax_throttle.plot(t, thrust_cmd, color=color, linestyle=":", linewidth=0.9, alpha=0.85)
+        ax_throttle.plot(t, thrust_act, color=color, linestyle=linestyle, linewidth=1.05)
+        ax_theta.plot(t, np.rad2deg(theta), color=color, linestyle=linestyle, linewidth=1.0)
+        ax_elevator.plot(t, np.rad2deg(elevator_cmd), color=color, linestyle=":", linewidth=0.9, alpha=0.85)
+        ax_elevator.plot(t, np.rad2deg(elevator_act), color=color, linestyle=linestyle, linewidth=1.05)
+
+        summary_rows.append(
+            (
+                label,
+                float(np.rad2deg(np.max(np.abs(state[:, 1])))),
+                float(np.rad2deg(np.max(np.abs(theta)))),
+                float(np.min(state[:, 0])),
+                float(np.max(state[:, 0])),
+                float(np.max(path[:, 1]) - np.min(path[:, 1])),
+            )
+        )
+
+    ax_path.set_title("Validation flight paths")
+    ax_path.set_xlabel("$p_x-p_x(0)$ [m]")
+    ax_path.set_ylabel("$p_z-p_z(0)$ [m]")
+    ax_path.grid(True, alpha=0.25)
+    ax_path.legend(fontsize=6.8, loc="best")
+
+    ax_speed.set_title("Airspeed")
+    ax_speed.set_xlabel("time [s]")
+    ax_speed.set_ylabel("$V$ [m/s]")
+    ax_speed.grid(True, alpha=0.25)
+
+    ax_alpha.axhline(12.0, color="0.35", linestyle="--", linewidth=0.8, alpha=0.8)
+    ax_alpha.axhline(-12.0, color="0.35", linestyle="--", linewidth=0.8, alpha=0.8)
+    ax_alpha.text(0.99, 0.90, "stall onset", transform=ax_alpha.transAxes, ha="right", fontsize=7.5, color="0.25")
+    ax_alpha.set_title("Angle of attack")
+    ax_alpha.set_xlabel("time [s]")
+    ax_alpha.set_ylabel(r"$\alpha$ [deg]")
+    ax_alpha.grid(True, alpha=0.25)
+
+    ax_throttle.set_title("Thrust command and realized input")
+    ax_throttle.set_xlabel("time [s]")
+    ax_throttle.set_ylabel("$T$ [N]")
+    ax_throttle.grid(True, alpha=0.25)
+
+    ax_theta.set_title("Pitch attitude")
+    ax_theta.set_xlabel("time [s]")
+    ax_theta.set_ylabel(r"$\theta=\alpha+\gamma$ [deg]")
+    ax_theta.grid(True, alpha=0.25)
+
+    ax_elevator.set_title("Elevator command and realized input")
+    ax_elevator.set_xlabel("time [s]")
+    ax_elevator.set_ylabel(r"$\delta_e$ [deg]")
+    ax_elevator.grid(True, alpha=0.25)
+    ax_elevator.text(
+        0.01,
+        0.04,
+        "solid/dashed: actuator input, dotted: pilot command",
+        transform=ax_elevator.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=7.4,
+        bbox={"boxstyle": "round,pad=0.2", "facecolor": "white", "edgecolor": "0.8", "alpha": 0.85},
+    )
+
+    fig.suptitle("Representative validation maneuvers used by the benchmark", fontsize=12.5)
+    output = METHOD_FIG / "benchmark_maneuver_overview.svg"
+    fig.savefig(output, bbox_inches="tight")
+    fig.savefig(output.with_suffix(".png"), dpi=220, bbox_inches="tight")
+    plt.close(fig)
+
+    summary_path = METHOD_RESULTS / "benchmark_maneuver_summary.csv"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    with summary_path.open("w", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(["mode", "max_abs_alpha_deg", "max_abs_theta_deg", "min_speed_mps", "max_speed_mps", "vertical_extent_m"])
+        writer.writerows(summary_rows)
 
 
 def plot_benchmark_problem_matrix() -> None:
@@ -643,62 +907,86 @@ def plot_method_score_heatmap() -> None:
     modes = available_archived_modes()
     if not modes:
         return
-    columns: list[tuple[str, str, str]] = []
-    values_by_method: dict[str, dict[tuple[str, str], float]] = {}
+    values_by_source: dict[str, dict[str, dict[str, float]]] = {"direct": {}, "mocap": {}}
+    modes_by_source: dict[str, list[tuple[str, str]]] = {"direct": [], "mocap": []}
     for mode in modes:
         rows = [row for row in read_csv(archived_path(mode, "shared_method_comparison.csv", METHOD_RESULTS)) if is_open_loop_model_row(row)]
         for source in ["direct", "mocap"]:
             source_rows = [row for row in rows if row.get("state_source") == source]
             if not source_rows:
                 continue
-            columns.append((mode, source, f"{DATASET_TITLES[mode]}\n{source}"))
+            modes_by_source[source].append((mode, DATASET_TITLES[mode]))
             for row in source_rows:
                 method = clean_method_name(row["method"], source)
-                values_by_method.setdefault(method, {})[(mode, source)] = max(float(row["validation_score"]), 1e-6)
+                values_by_source[source].setdefault(method, {})[mode] = max(float(row["validation_score"]), 1e-6)
 
-    if not columns:
-        return
-    methods = sorted(
-        values_by_method,
-        key=lambda method: min(values_by_method[method].values()),
-    )
-    matrix = np.full((len(methods), len(columns)), np.nan)
-    for row_idx, method in enumerate(methods):
-        for col_idx, (mode, source, _label) in enumerate(columns):
-            matrix[row_idx, col_idx] = values_by_method[method].get((mode, source), np.nan)
+    for source, source_title in [("direct", "Direct-state benchmark"), ("mocap", "Mocap-derived benchmark")]:
+        source_values = values_by_source[source]
+        source_modes = modes_by_source[source]
+        if not source_values or not source_modes:
+            continue
+        mean_by_method = {
+            method: float(np.mean(list(values.values())))
+            for method, values in source_values.items()
+            if values
+        }
+        methods = sorted(
+            source_values,
+            key=lambda method: (mean_by_method.get(method, float("inf")), method),
+        )
+        columns = [("__mean__", "Mean score")] + source_modes
+        matrix = np.full((len(methods), len(columns)), np.nan)
+        for row_idx, method in enumerate(methods):
+            matrix[row_idx, 0] = mean_by_method.get(method, np.nan)
+            for col_idx, (mode, _label) in enumerate(columns):
+                if mode == "__mean__":
+                    continue
+                matrix[row_idx, col_idx] = source_values[method].get(mode, np.nan)
 
-    finite = matrix[np.isfinite(matrix)]
-    if finite.size == 0:
-        return
-    vmin = max(float(np.nanpercentile(finite, 5)), 1e-4)
-    vmax = max(float(np.nanpercentile(finite, 95)), vmin * 10.0)
+        finite = matrix[np.isfinite(matrix)]
+        if finite.size == 0:
+            continue
+        vmin = max(float(np.nanpercentile(finite, 5)), 1e-4)
+        vmax = max(float(np.nanpercentile(finite, 95)), vmin * 10.0)
 
-    fig_height = max(5.8, 0.34 * len(methods) + 2.0)
-    fig_width = max(9.0, 1.28 * len(columns) + 2.2)
-    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
-    masked = np.ma.masked_invalid(matrix)
-    image = ax.imshow(masked, aspect="auto", cmap="viridis_r", norm=LogNorm(vmin=vmin, vmax=vmax))
-    ax.set_yticks(np.arange(len(methods)))
-    ax.set_yticklabels(methods, fontsize=7.2)
-    ax.set_xticks(np.arange(len(columns)))
-    ax.set_xticklabels([column[2] for column in columns], rotation=35, ha="right", fontsize=7.2)
-    ax.set_title("Validation trajectory error by method and benchmark condition")
-    ax.set_xlabel("benchmark condition")
-    ax.set_ylabel("method")
-    for row_idx in range(matrix.shape[0]):
-        for col_idx in range(matrix.shape[1]):
-            value = matrix[row_idx, col_idx]
-            if not np.isfinite(value):
-                continue
-            text = f"{value:.2g}" if value >= 0.01 else f"{value:.1e}"
-            ax.text(col_idx, row_idx, text, ha="center", va="center", fontsize=5.8, color="white" if value > np.sqrt(vmin * vmax) else "black")
-    cbar = fig.colorbar(image, ax=ax, fraction=0.025, pad=0.02)
-    cbar.set_label("validation trajectory error, lower is better")
-    fig.tight_layout()
-    output = METHOD_FIG / "method_score_heatmap.svg"
-    fig.savefig(output, bbox_inches="tight")
-    fig.savefig(output.with_suffix(".png"), dpi=220, bbox_inches="tight")
-    plt.close(fig)
+        fig_height = max(5.8, 0.36 * len(methods) + 2.0)
+        fig_width = max(8.8, 1.30 * len(columns) + 2.3)
+        fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+        masked = np.ma.masked_invalid(matrix)
+        image = ax.imshow(masked, aspect="auto", cmap="viridis_r", norm=LogNorm(vmin=vmin, vmax=vmax))
+        ax.set_yticks(np.arange(len(methods)))
+        ax.set_yticklabels(methods, fontsize=7.6)
+        ax.set_xticks(np.arange(len(columns)))
+        ax.set_xticklabels([column[1] for column in columns], rotation=32, ha="right", fontsize=7.4)
+        ax.set_title(f"Validation trajectory error: {source_title}")
+        ax.set_xlabel("benchmark condition")
+        ax.set_ylabel("method")
+        ax.set_xticks(np.arange(-0.5, len(columns), 1), minor=True)
+        ax.set_yticks(np.arange(-0.5, len(methods), 1), minor=True)
+        ax.grid(which="minor", color="white", linewidth=0.8, alpha=0.6)
+        ax.tick_params(which="minor", bottom=False, left=False)
+        for row_idx in range(matrix.shape[0]):
+            for col_idx in range(matrix.shape[1]):
+                value = matrix[row_idx, col_idx]
+                if not np.isfinite(value):
+                    continue
+                text = f"{value:.2g}" if value >= 0.01 else f"{value:.1e}"
+                ax.text(
+                    col_idx,
+                    row_idx,
+                    text,
+                    ha="center",
+                    va="center",
+                    fontsize=6.0,
+                    color="white" if value > np.sqrt(vmin * vmax) else "black",
+                )
+        cbar = fig.colorbar(image, ax=ax, fraction=0.025, pad=0.02)
+        cbar.set_label("validation score: mean state NRMSE, lower is better")
+        fig.tight_layout()
+        output = METHOD_FIG / f"method_score_heatmap_{source}.svg"
+        fig.savefig(output, bbox_inches="tight")
+        fig.savefig(output.with_suffix(".png"), dpi=220, bbox_inches="tight")
+        plt.close(fig)
 
 
 def copy_figures() -> None:
@@ -718,7 +1006,12 @@ def copy_figures() -> None:
     panel = METHOD_FIG / "dataset_direct_validation_score_panels.svg"
     if panel.exists():
         shutil.copy2(panel, LATEX_FIG / "generated_dataset_direct_validation_score_panels.svg")
-    for name in ["benchmark_problem_matrix.svg", "method_score_heatmap.svg"]:
+    for name in [
+        "benchmark_problem_matrix.svg",
+        "benchmark_maneuver_overview.svg",
+        "method_score_heatmap_direct.svg",
+        "method_score_heatmap_mocap.svg",
+    ]:
         source = METHOD_FIG / name
         if source.exists():
             shutil.copy2(source, LATEX_FIG / f"generated_{name}")
@@ -727,6 +1020,7 @@ def copy_figures() -> None:
 def latex_assets(_args: argparse.Namespace) -> None:
     LATEX_GENERATED.mkdir(parents=True, exist_ok=True)
     LATEX_FIG.mkdir(parents=True, exist_ok=True)
+    clean_latex_generated_assets()
     write_shared_method_table()
     write_experiment_method_tables()
     write_observation_rate_table()
@@ -737,6 +1031,7 @@ def latex_assets(_args: argparse.Namespace) -> None:
         plot_archived_train_time_accuracy(mode, read_csv(archived_path(mode, "shared_method_comparison.csv", METHOD_RESULTS)))
     plot_dataset_score_panels()
     plot_benchmark_problem_matrix()
+    plot_maneuver_overview()
     plot_method_score_heatmap()
     copy_figures()
     print(f"Wrote LaTeX tables to {LATEX_GENERATED}")
@@ -800,12 +1095,6 @@ def suite_command(
         str(args.vi_stride),
         "--max-vi-nfev",
         str(args.max_vi_nfev),
-        "--max-integrated-sindy-trials",
-        str(args.max_integrated_sindy_trials),
-        "--integrated-sindy-stride",
-        str(args.integrated_sindy_stride),
-        "--max-integrated-sindy-nfev",
-        str(args.max_integrated_sindy_nfev),
         "--frequency-nperseg",
         str(args.frequency_nperseg),
         "--frequency-min-coherence",
@@ -819,17 +1108,22 @@ def suite_command(
         "--fig-dir",
         str(fig_dir),
     ]
+    include_methods = getattr(args, "include_methods", None)
+    if include_methods and include_methods != ["all"]:
+        command.append("--include-methods")
+        command.extend(include_methods)
     if args.skip_oem:
         command.append("--skip-oem")
     return command
 
 
 def suite(args: argparse.Namespace) -> None:
+    clean_suite_artifacts(args.dataset_modes)
     available_cores = os.cpu_count() or 2
     core_limited_jobs = max(1, available_cores - 1)
-    task_count = len(args.dataset_modes) * (2 if args.state_source == "both" and args.split_sources else 1)
+    task_count = len(build_suite_tasks(args))
     jobs = max(1, min(int(args.jobs), core_limited_jobs, task_count or 1))
-    if jobs == 1:
+    if jobs == 1 and not args.split_methods:
         for mode in args.dataset_modes:
             run(suite_command(args, mode))
             archive_suite_outputs(mode)
@@ -842,18 +1136,22 @@ def suite(args: argparse.Namespace) -> None:
 def run_suite_parallel(args: argparse.Namespace, jobs: int) -> None:
     work_root = METHODS / ".suite_work"
     work_root.mkdir(parents=True, exist_ok=True)
-    if args.state_source == "both" and args.split_sources:
-        pending = [(mode, source) for mode in args.dataset_modes for source in ("direct", "mocap")]
-    else:
-        pending = [(mode, args.state_source) for mode in args.dataset_modes]
-    running: dict[int, tuple[str, str, subprocess.Popen, float, Path, Path, Path]] = {}
-    completed: dict[str, dict[str, tuple[Path, Path, Path]]] = {}
+    pending = build_suite_tasks(args)
+    total_tasks = len(pending)
+    running: dict[int, tuple[str, str, str, subprocess.Popen, float, Path, Path, Path]] = {}
+    completed: dict[str, dict[str, list[tuple[Path, Path, Path]]]] = {}
     rows: list[dict[str, object]] = []
+    suite_start = time.perf_counter()
+    next_progress = suite_start
+    failed = 0
     try:
         while pending or running:
             while pending and len(running) < jobs:
-                mode, source = pending.pop(0)
-                mode_root = work_root / f"{mode}_{source}" if args.state_source == "both" and args.split_sources else work_root / mode
+                task_index = next_launchable_task_index(pending, running, args.max_heavy_workers, args.max_gpu_workers)
+                if task_index is None:
+                    break
+                mode, source, method = pending.pop(task_index)
+                mode_root = work_root / f"{mode}_{source}_{method.replace('-', '_')}"
                 shutil.rmtree(mode_root, ignore_errors=True)
                 results_dir = mode_root / "results"
                 table_dir = mode_root / "tables"
@@ -863,38 +1161,196 @@ def run_suite_parallel(args: argparse.Namespace, jobs: int) -> None:
                 fig_dir.mkdir(parents=True, exist_ok=True)
                 local_args = argparse.Namespace(**vars(args))
                 local_args.state_source = source
+                local_args.include_methods = ["all"] if method == "all" else [method]
                 command = suite_command(local_args, mode, results_dir, table_dir, fig_dir)
                 print("+", " ".join(command), flush=True)
-                process = subprocess.Popen(command, cwd=ROOT, env=worker_env(args.threads_per_worker))
-                running[process.pid] = (mode, source, process, time.perf_counter(), results_dir, table_dir, fig_dir)
-            pid, status, usage = os.wait4(-1, 0)
+                log_path = mode_root / "worker.log"
+                log_stream = log_path.open("w")
+                log_stream.write("+ " + " ".join(command) + "\n")
+                log_stream.flush()
+                process = subprocess.Popen(
+                    command,
+                    cwd=ROOT,
+                    env=worker_env(args.threads_per_worker),
+                    stdout=log_stream,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                running[process.pid] = (mode, source, method, process, time.perf_counter(), results_dir, table_dir, fig_dir, log_stream, log_path)
+
+            now = time.perf_counter()
+            if now >= next_progress:
+                print_suite_progress(
+                    total_tasks=total_tasks,
+                    completed_tasks=len(rows),
+                    failed_tasks=failed,
+                    pending_tasks=len(pending),
+                    running=running,
+                    suite_start=suite_start,
+                )
+                next_progress = now + max(1.0, float(args.progress_interval))
+
+            try:
+                pid, status, usage = os.wait4(-1, os.WNOHANG)
+            except ChildProcessError:
+                break
+            if pid == 0:
+                time.sleep(0.5)
+                continue
             if pid not in running:
                 continue
-            mode, source, process, start, results_dir, table_dir, fig_dir = running.pop(pid)
+            mode, source, method, process, start, results_dir, table_dir, fig_dir, log_stream, log_path = running.pop(pid)
+            log_stream.close()
             exit_code = os.waitstatus_to_exitcode(status)
             wall_s = time.perf_counter() - start
             cpu_s = usage.ru_utime + usage.ru_stime
-            rows.append({"mode": mode, "source": source, "exit_code": exit_code, "wall_s": wall_s, "child_cpu_s": cpu_s})
+            rows.append({"mode": mode, "source": source, "method": method, "exit_code": exit_code, "wall_s": wall_s, "child_cpu_s": cpu_s})
             if exit_code != 0:
-                for _mode, _source, other, *_rest in running.values():
+                failed += 1
+                print_suite_progress(
+                    total_tasks=total_tasks,
+                    completed_tasks=len(rows),
+                    failed_tasks=failed,
+                    pending_tasks=len(pending),
+                    running=running,
+                    suite_start=suite_start,
+                )
+                print_worker_log_tail(log_path)
+                for _mode, _source, _method, other, *_rest in running.values():
                     other.terminate()
                 raise subprocess.CalledProcessError(exit_code, process.args)
-            if args.state_source == "both" and args.split_sources:
-                completed.setdefault(mode, {})[source] = (results_dir, table_dir, fig_dir)
-                print(f"finished {mode}/{source}: wall={wall_s:.1f}s child_cpu={cpu_s:.1f}s", flush=True)
+            if args.split_sources or args.split_methods:
+                completed.setdefault(mode, {}).setdefault(source, []).append((results_dir, table_dir, fig_dir))
+                print(f"finished {mode}/{source}/{method}: wall={wall_s:.1f}s child_cpu={cpu_s:.1f}s", flush=True)
             else:
                 archive_suite_outputs(mode, results_dir, table_dir, fig_dir)
                 print(f"archived {mode}: wall={wall_s:.1f}s child_cpu={cpu_s:.1f}s", flush=True)
-        if args.state_source == "both" and args.split_sources:
+        if args.split_sources or args.split_methods:
             for mode in args.dataset_modes:
                 archive_split_source_outputs(mode, completed.get(mode, {}))
+        print_suite_progress(
+            total_tasks=total_tasks,
+            completed_tasks=len(rows),
+            failed_tasks=failed,
+            pending_tasks=len(pending),
+            running=running,
+            suite_start=suite_start,
+        )
     finally:
+        for _mode, _source, _method, _process, *_rest, log_stream, _log_path in running.values():
+            try:
+                log_stream.close()
+            except Exception:
+                pass
         if rows:
             METHOD_RESULTS.mkdir(parents=True, exist_ok=True)
             with (METHOD_RESULTS / "suite_orchestration.csv").open("w", newline="") as stream:
-                writer = csv.DictWriter(stream, fieldnames=["mode", "source", "exit_code", "wall_s", "child_cpu_s"])
+                writer = csv.DictWriter(stream, fieldnames=["mode", "source", "method", "exit_code", "wall_s", "child_cpu_s"])
                 writer.writeheader()
                 writer.writerows(rows)
+
+
+def format_duration(seconds: float | None) -> str:
+    if seconds is None or not np.isfinite(seconds):
+        return "unknown"
+    seconds = max(0, int(round(seconds)))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}h {minutes:02d}m {secs:02d}s"
+    if minutes:
+        return f"{minutes:d}m {secs:02d}s"
+    return f"{secs:d}s"
+
+
+def print_worker_log_tail(log_path: Path, lines: int = 80) -> None:
+    if not log_path.exists():
+        return
+    content = log_path.read_text(errors="replace").splitlines()
+    print(f"--- tail of failed worker log: {log_path} ---", flush=True)
+    for line in content[-lines:]:
+        print(line, flush=True)
+    print("--- end failed worker log ---", flush=True)
+
+
+def print_suite_progress(
+    *,
+    total_tasks: int,
+    completed_tasks: int,
+    failed_tasks: int,
+    pending_tasks: int,
+    running: dict[int, tuple],
+    suite_start: float,
+) -> None:
+    elapsed = time.perf_counter() - suite_start
+    success_tasks = max(0, completed_tasks - failed_tasks)
+    remaining_tasks = max(0, total_tasks - completed_tasks)
+    rate = completed_tasks / elapsed if completed_tasks and elapsed > 0 else 0.0
+    eta = remaining_tasks / rate if rate > 0 else None
+    percent = 100.0 * completed_tasks / total_tasks if total_tasks else 100.0
+    active = sorted(
+        ((time.perf_counter() - start, mode, source, method) for mode, source, method, _process, start, *_rest in running.values()),
+        reverse=True,
+    )
+    heavy_running = sum(1 for _age, _mode, _source, method in active if method in HEAVY_METHOD_WORKERS)
+    gpu_running = sum(1 for _age, _mode, _source, method in active if method in GPU_METHOD_WORKERS)
+    active_summary = ", ".join(f"{mode}/{source}/{method} {format_duration(age)}" for age, mode, source, method in active[:5])
+    if len(active) > 5:
+        active_summary += f", +{len(active) - 5} more"
+    if not active_summary:
+        active_summary = "none"
+    print(
+        "[suite] "
+        f"{completed_tasks}/{total_tasks} complete ({percent:.1f}%), "
+        f"ok={success_tasks}, failed={failed_tasks}, running={len(running)}, pending={pending_tasks}, "
+        f"heavy={heavy_running}, gpu={gpu_running}, "
+        f"elapsed={format_duration(elapsed)}, eta={format_duration(eta)}, "
+        f"active={active_summary}",
+        flush=True,
+    )
+
+
+def next_launchable_task_index(
+    pending: list[tuple[str, str, str]],
+    running: dict[int, tuple],
+    max_heavy_workers: int,
+    max_gpu_workers: int,
+) -> int | None:
+    if not pending:
+        return None
+    heavy_limit = max(1, int(max_heavy_workers))
+    gpu_limit = max(1, int(max_gpu_workers))
+    heavy_running = sum(1 for mode, source, method, *_rest in running.values() if method in HEAVY_METHOD_WORKERS)
+    gpu_running = sum(1 for mode, source, method, *_rest in running.values() if method in GPU_METHOD_WORKERS)
+    for index, (_mode, _source, method) in enumerate(pending):
+        if method in HEAVY_METHOD_WORKERS and heavy_running >= heavy_limit:
+            continue
+        if method in GPU_METHOD_WORKERS and gpu_running >= gpu_limit:
+            continue
+        return index
+    return None
+
+
+def build_suite_tasks(args: argparse.Namespace) -> list[tuple[str, str, str]]:
+    sources = ["direct", "mocap"] if args.state_source == "both" and args.split_sources else [args.state_source]
+    if args.split_methods:
+        methods = list(METHOD_WORKERS) if args.include_methods == ["all"] else list(args.include_methods)
+    else:
+        methods = ["all"]
+    tasks = [(mode, source, method) for mode in args.dataset_modes for source in sources for method in methods]
+    if args.heavy_first:
+        mode_order = {mode: index for index, mode in enumerate(args.dataset_modes)}
+        source_order = {"mocap": 0, "direct": 1}
+        method_order = {method: index for index, method in enumerate(METHOD_WORKERS)}
+        tasks.sort(
+            key=lambda task: (
+                0 if task[2] in HEAVY_METHOD_WORKERS else 1,
+                source_order.get(task[1], 2) if task[2] in HEAVY_METHOD_WORKERS else mode_order.get(task[0], 999),
+                mode_order.get(task[0], 999) if task[2] in HEAVY_METHOD_WORKERS else source_order.get(task[1], 2),
+                method_order.get(task[2], 999),
+            )
+        )
+    return tasks
 
 
 def archive_suite_outputs(
@@ -934,45 +1390,49 @@ def write_csv_rows(path: Path, rows: list[dict[str, str]]) -> None:
         writer.writerows(rows)
 
 
-def archive_split_source_outputs(mode: str, source_outputs: dict[str, tuple[Path, Path, Path]]) -> None:
+def archive_split_source_outputs(mode: str, source_outputs: dict[str, list[tuple[Path, Path, Path]]]) -> None:
     if not source_outputs:
         return
     for filename in ["shared_method_comparison.csv", "shared_uq_diagnostics.csv"]:
         rows: list[dict[str, str]] = []
         table_rows: list[dict[str, str]] = []
         for source in ("direct", "mocap"):
-            paths = source_outputs.get(source)
-            if not paths:
+            path_list = source_outputs.get(source, [])
+            if not path_list:
                 continue
-            results_dir, table_dir, _fig_dir = paths
-            result_file = results_dir / filename
-            table_file = table_dir / filename
-            if result_file.exists():
-                rows.extend(read_csv(result_file))
-            if table_file.exists():
-                table_rows.extend(read_csv(table_file))
+            for results_dir, table_dir, _fig_dir in path_list:
+                result_file = results_dir / filename
+                table_file = table_dir / filename
+                if result_file.exists():
+                    rows.extend(read_csv(result_file))
+                if table_file.exists():
+                    table_rows.extend(read_csv(table_file))
         write_csv_rows(archived_path(mode, filename, METHOD_RESULTS), rows)
         write_csv_rows(archived_path(mode, filename, METHODS / "tables"), table_rows or rows)
 
     for filename in ["shared_frequency_summary.csv", "shared_sindy_coefficients.csv", "shared_symbolic_coefficients.csv"]:
         for source in ("mocap", "direct"):
-            paths = source_outputs.get(source)
-            if paths and (paths[0] / filename).exists():
-                shutil.copy2(paths[0] / filename, archived_path(mode, filename, METHOD_RESULTS))
-                break
+            for paths in source_outputs.get(source, []):
+                if (paths[0] / filename).exists():
+                    shutil.copy2(paths[0] / filename, archived_path(mode, filename, METHOD_RESULTS))
+                    break
+            else:
+                continue
+            break
 
     for filename in ARCHIVED_FIGURES:
         for source in ("mocap", "direct"):
-            paths = source_outputs.get(source)
-            if not paths:
+            for paths in source_outputs.get(source, []):
+                fig_source = paths[2] / filename
+                if fig_source.exists():
+                    shutil.copy2(fig_source, METHOD_FIG / f"{mode}_{filename}")
+                    png = fig_source.with_suffix(".png")
+                    if png.exists():
+                        shutil.copy2(png, METHOD_FIG / f"{mode}_{Path(filename).with_suffix('.png').name}")
+                    break
+            else:
                 continue
-            fig_source = paths[2] / filename
-            if fig_source.exists():
-                shutil.copy2(fig_source, METHOD_FIG / f"{mode}_{filename}")
-                png = fig_source.with_suffix(".png")
-                if png.exists():
-                    shutil.copy2(png, METHOD_FIG / f"{mode}_{Path(filename).with_suffix('.png').name}")
-                break
+            break
     print(f"archived {mode} from split source workers", flush=True)
 
 
@@ -1031,22 +1491,27 @@ def add_shared_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-vi-trials", type=int, default=2)
     parser.add_argument("--vi-stride", type=int, default=40)
     parser.add_argument("--max-vi-nfev", type=int, default=25)
-    parser.add_argument("--max-integrated-sindy-trials", type=int, default=2)
-    parser.add_argument("--integrated-sindy-stride", type=int, default=20)
-    parser.add_argument("--max-integrated-sindy-nfev", type=int, default=35)
     parser.add_argument("--frequency-nperseg", type=int, default=1024)
     parser.add_argument("--frequency-min-coherence", type=float, default=0.08)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--skip-oem", action="store_true")
+    parser.add_argument("--include-methods", nargs="*", default=["all"], help="methods to include when running the suite")
     parser.add_argument(
         "--jobs",
         type=int,
-        default=max(1, min(10, 2 * len(DATASET_MODES), (os.cpu_count() or 2) - 1)),
-        help="parallel suite workers; capped internally to leave at least one CPU core free",
+        default=max(1, min(30, 2 * len(DATASET_MODES) * len(METHOD_WORKERS), (os.cpu_count() or 2) - 2)),
+        help="parallel suite workers; default targets 30 workers on a 32-thread workstation and is capped internally",
     )
-    parser.add_argument("--threads-per-worker", type=int, default=2, help="BLAS/OpenMP threads per worker process")
+    parser.add_argument("--threads-per-worker", type=int, default=1, help="BLAS/OpenMP threads per worker process")
+    parser.add_argument("--max-heavy-workers", type=int, default=1, help="maximum concurrent memory-heavy method workers")
+    parser.add_argument("--max-gpu-workers", type=int, default=2, help="maximum concurrent GPU-training method workers")
+    parser.add_argument("--progress-interval", type=float, default=30.0, help="seconds between global suite progress and ETA reports")
+    parser.add_argument("--no-heavy-first", dest="heavy_first", action="store_false", help="do not force memory-heavy methods to run before the rest of the suite")
     parser.add_argument("--no-split-sources", dest="split_sources", action="store_false", help="do not split direct and mocap source runs into separate parallel workers")
+    parser.add_argument("--no-split-methods", dest="split_methods", action="store_false", help="do not split individual methods into separate parallel workers")
+    parser.set_defaults(heavy_first=True)
     parser.set_defaults(split_sources=True)
+    parser.set_defaults(split_methods=True)
 
 
 def parse_args() -> argparse.Namespace:

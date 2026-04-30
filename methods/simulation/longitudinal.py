@@ -1,9 +1,10 @@
 """3-DOF longitudinal aircraft simulator with hidden nonlinear aerodynamics.
 
 The nominal model matches the four-state longitudinal benchmark used elsewhere
-in this repository.  The true simulator keeps the nominal terms but adds smooth,
-bounded nonlinear residual coefficient terms.  The residuals are deliberately
-small enough that the model is close to nominal, but structured enough to create
+in this repository.  The true simulator keeps the nominal terms near trim but
+adds smooth stall-like coefficient nonlinearities: lift-curve rollover, drag
+rise, and a nose-down pitching-moment break.  This keeps the benchmark close to
+nominal for local maneuvers while making aggressive trajectories expose
 model-form error for OEM, SINDy, PINN, and UDE comparisons.
 """
 
@@ -27,6 +28,14 @@ LOAD_NAMES = np.array(["L", "D", "M"])
 STATE_LABELS = [r"$V$ [m/s]", r"$\alpha$ [deg]", r"$\gamma$ [deg]", r"$Q$ [deg/s]"]
 MOCAP_RATE_HZ = 100.0
 MOCAP_DT = 1.0 / MOCAP_RATE_HZ
+STALL_ALPHA_RAD = np.deg2rad(12.0)
+STALL_WIDTH_RAD = np.deg2rad(2.0)
+STALL_CL_MAX = 1.05
+MIN_ENVELOPE_SPEED = 4.0
+MAX_ENVELOPE_SPEED = 34.0
+MAX_ENVELOPE_ALPHA = 0.75
+MAX_ENVELOPE_GAMMA = 1.20
+MAX_ENVELOPE_Q = 3.50
 
 
 @dataclass(frozen=True)
@@ -74,9 +83,11 @@ class SimulationConfig:
     dataset_mode: Literal[
         "open_loop",
         "sine_sweep",
+        "aggressive",
         "safe_loop",
         "open_loop_safe",
         "sine_sweep_safe",
+        "aggressive_safe",
         "proprietary_autopilot",
     ] = "open_loop"
     measurement_noise: tuple[float, float, float, float] = (0.08, 0.0035, 0.0035, 0.012)
@@ -150,7 +161,12 @@ def nominal_coefficients(x: np.ndarray, u: np.ndarray, aero: NominalAero) -> np.
     return np.array([c_l, c_d, c_m])
 
 
-def nonlinear_residual_coefficients(x: np.ndarray, u: np.ndarray, scale: float = 1.0) -> np.ndarray:
+def nonlinear_residual_coefficients(
+    x: np.ndarray,
+    u: np.ndarray,
+    scale: float = 1.0,
+    aero: NominalAero | None = None,
+) -> np.ndarray:
     v, alpha, gamma, q_rate = x
     _, elevator = u
     v_ref = (v - 15.0) / 15.0
@@ -158,16 +174,44 @@ def nonlinear_residual_coefficients(x: np.ndarray, u: np.ndarray, scale: float =
     a_ref = alpha / 0.20
     e_ref = elevator / 0.25
 
-    # Smooth model-form error: close to nominal near trim, nonlinear off trim.
-    d_c_l = 0.018 * np.tanh(1.4 * a_ref) ** 2 + 0.010 * np.sin(1.8 * e_ref) + 0.012 * a_ref * q_ref
-    d_c_d = 0.006 * a_ref**4 + 0.004 * e_ref**2 + 0.003 * (1.0 + np.tanh(3.0 * (alpha - 0.13)))
-    d_c_m = -0.010 * a_ref**3 + 0.006 * a_ref * e_ref + 0.005 * np.tanh(q_ref) * abs(a_ref)
+    alpha_sign = np.tanh(alpha / 0.015)
+    abs_alpha = abs(alpha)
+    stall_gate = 1.0 / (1.0 + np.exp(-np.clip((abs_alpha - STALL_ALPHA_RAD) / STALL_WIDTH_RAD, -60.0, 60.0)))
+    alpha_excess = STALL_WIDTH_RAD * np.log1p(np.exp(np.clip((abs_alpha - STALL_ALPHA_RAD) / STALL_WIDTH_RAD, -60.0, 60.0)))
+
+    aero = aero or NominalAero()
+    nominal = nominal_coefficients(x, u, aero)
+    c_l_attached = nominal[0]
+
+    # Smooth small-RC stall model.  The attached-flow lift curve is retained
+    # near trim.  Past the stall onset the true lift rolls toward a finite
+    # separated-flow plateau instead of growing linearly without bound.
+    c_l_post = alpha_sign * (STALL_CL_MAX - 1.35 * alpha_excess)
+    c_l_post += 0.035 * np.tanh(1.5 * e_ref) + 0.018 * np.tanh(q_ref)
+    c_l_true = (1.0 - stall_gate) * c_l_attached + stall_gate * c_l_post
+    c_l_true += (1.0 - 0.65 * stall_gate) * (0.010 * np.sin(1.8 * e_ref) + 0.010 * a_ref * q_ref)
+
+    # Drag rises strongly in separated flow.  This creates the main practical
+    # penalty of post-stall RC maneuvers: speed bleeds off quickly during hard
+    # pull-ups even when the lift curve has already saturated.
+    d_c_d = 0.0035 * e_ref**2 + 0.0025 * a_ref**4
+    d_c_d += stall_gate * (0.090 + 0.95 * alpha_excess + 4.50 * alpha_excess**2)
+    d_c_d += 0.016 * stall_gate * max(-v_ref, 0.0)
+
+    # The pitching moment has a mild pre-stall residual and a post-stall
+    # nose-down break.  For positive alpha this is negative, matching the
+    # recovery tendency of a conventional trainer wing/tail combination.
+    d_c_m = -0.006 * a_ref**3 + 0.006 * a_ref * e_ref + 0.004 * np.tanh(q_ref) * abs(a_ref)
     d_c_m += 0.0025 * np.sin(2.0 * gamma)
+    d_c_m += -stall_gate * (0.075 + 0.55 * alpha_excess) * alpha_sign
+    d_c_m += -0.018 * stall_gate * np.tanh(e_ref)
+
+    d_c_l = c_l_true - c_l_attached
     return scale * np.array([d_c_l, d_c_d, d_c_m])
 
 
 def true_coefficients(x: np.ndarray, u: np.ndarray, aero: NominalAero, scale: float = 1.0) -> np.ndarray:
-    return nominal_coefficients(x, u, aero) + nonlinear_residual_coefficients(x, u, scale)
+    return nominal_coefficients(x, u, aero) + nonlinear_residual_coefficients(x, u, scale, aero)
 
 
 def loads_from_coefficients(x: np.ndarray, coeff: np.ndarray, aircraft: Aircraft) -> np.ndarray:
@@ -347,21 +391,33 @@ def sine_sweep_command(
     split: Literal["train", "validation"],
 ) -> np.ndarray:
     duration = max(t[-1] - t[0], 1.0)
-    thrust = np.full_like(t, u_trim[0])
-    elevator = np.full_like(t, u_trim[1])
-    f0 = rng.uniform(0.035, 0.070)
-    f1 = rng.uniform(1.20, 2.40) if split == "train" else rng.uniform(1.60, 2.80)
+    command = open_loop_command(t, u_trim, rng, split=split)
+    thrust = command[:, 0].copy()
+    elevator = command[:, 1].copy()
+    f0 = rng.uniform(0.04, 0.08)
+    f1 = rng.uniform(1.80, 3.20) if split == "train" else rng.uniform(2.10, 3.60)
     phase0 = rng.uniform(0.0, 2.0 * np.pi)
     sweep_rate = (f1 - f0) / duration
     phase = 2.0 * np.pi * (f0 * t + 0.5 * sweep_rate * t**2) + phase0
-    amp = rng.uniform(0.020, 0.034) if split == "train" else rng.uniform(0.018, 0.030)
+    amp = rng.uniform(0.110, 0.170) if split == "train" else rng.uniform(0.130, 0.200)
     envelope = np.sin(np.pi * np.clip(t / duration, 0.0, 1.0)) ** 0.35
     elevator += amp * envelope * np.sin(phase)
-    elevator += 0.006 * np.sin(2.0 * phase + rng.uniform(0.0, 2.0 * np.pi))
+    elevator += 0.018 * envelope * np.sin(2.0 * phase + rng.uniform(0.0, 2.0 * np.pi))
+
+    # Add deterministic high-alpha dwell segments so the frequency-rich dataset
+    # still samples separated-flow behavior instead of remaining a small-signal
+    # linear frequency-response test.
+    centers = np.linspace(0.16 * duration, 0.82 * duration, 6 if split == "train" else 5)
+    centers += rng.uniform(-0.025 * duration, 0.025 * duration, size=len(centers))
+    for center in centers:
+        width = rng.uniform(2.8, 5.4)
+        pulse = 0.5 * (np.tanh(4.2 * (t - center)) - np.tanh(4.2 * (t - center - width)))
+        elevator += rng.uniform(0.330, 0.460) * pulse
+        thrust -= rng.uniform(0.240, 0.620) * pulse
 
     thrust_phase = rng.uniform(0.0, 2.0 * np.pi)
-    thrust += rng.uniform(0.025, 0.055) * np.sin(2.0 * np.pi * rng.uniform(0.04, 0.12) * t + thrust_phase)
-    return np.column_stack((np.clip(thrust, 0.0, 3.0), np.clip(elevator, -0.35, 0.35)))
+    thrust += rng.uniform(0.10, 0.24) * np.sin(2.0 * np.pi * rng.uniform(0.04, 0.14) * t + thrust_phase)
+    return np.column_stack((np.clip(thrust, 0.08, 2.80), np.clip(elevator, -0.35, 0.35)))
 
 
 def recovery_probe_command(
@@ -371,19 +427,81 @@ def recovery_probe_command(
     *,
     split: Literal["train", "validation"],
 ) -> np.ndarray:
+    command = aggressive_command(t, u_trim, rng, split=split)
+    duration = t[-1] - t[0]
+    thrust = command[:, 0].copy()
+    elevator = command[:, 1].copy()
+    pulse_count = 6 if split == "train" else 5
+    centers = np.linspace(0.12 * duration, 0.86 * duration, pulse_count)
+    centers += rng.uniform(-0.035 * duration, 0.035 * duration, size=pulse_count)
+    for center in centers:
+        width = rng.uniform(1.2, 2.8)
+        pulse = 0.5 * (np.tanh(5.0 * (t - center)) - np.tanh(5.0 * (t - center - width)))
+        elevator += rng.uniform(0.120, 0.240) * pulse
+        thrust -= rng.uniform(0.060, 0.260) * pulse
+    return np.column_stack((np.clip(thrust, 0.20, 2.80), np.clip(elevator, -0.35, 0.35)))
+
+
+def aggressive_command(
+    t: np.ndarray,
+    u_trim: np.ndarray,
+    rng: np.random.Generator,
+    *,
+    split: Literal["train", "validation"],
+) -> np.ndarray:
+    """High-excitation longitudinal maneuver for nonlinear aerodynamic stress tests."""
+
     command = open_loop_command(t, u_trim, rng, split=split)
     duration = t[-1] - t[0]
     thrust = command[:, 0].copy()
     elevator = command[:, 1].copy()
+
+    # Fast elevator doublets excite pitch-rate and alpha-dependent residuals.
+    doublet_count = 8 if split == "train" else 7
+    for _ in range(doublet_count):
+        center = rng.uniform(0.06 * duration, 0.90 * duration)
+        width = rng.uniform(0.18, 0.70)
+        sign = rng.choice([-1.0, 1.0])
+        doublet = 0.5 * (
+            np.tanh(34.0 * (t - center))
+            - 2.0 * np.tanh(34.0 * (t - center - width))
+            + np.tanh(34.0 * (t - center - 2.0 * width))
+        )
+        elevator += sign * rng.uniform(0.080, 0.150) * doublet
+
+    # Longer pull-up and pushover pulses move the trajectory away from trim so
+    # the residual coefficient model is no longer well approximated by a local
+    # Taylor expansion.
     pulse_count = 5 if split == "train" else 4
-    centers = np.linspace(0.15 * duration, 0.85 * duration, pulse_count)
-    centers += rng.uniform(-0.04 * duration, 0.04 * duration, size=pulse_count)
+    centers = np.linspace(0.12 * duration, 0.84 * duration, pulse_count)
+    centers += rng.uniform(-0.035 * duration, 0.035 * duration, size=pulse_count)
     for center in centers:
-        width = rng.uniform(0.7, 1.8)
-        pulse = 0.5 * (np.tanh(5.0 * (t - center)) - np.tanh(5.0 * (t - center - width)))
-        elevator += rng.uniform(0.050, 0.085) * pulse
-        thrust -= rng.uniform(0.060, 0.120) * pulse
-    return np.column_stack((np.clip(thrust, 0.0, 3.0), np.clip(elevator, -0.35, 0.35)))
+        width = rng.uniform(0.70, 2.10)
+        sign = rng.choice([-1.0, 1.0])
+        pulse = 0.5 * (np.tanh(6.0 * (t - center)) - np.tanh(6.0 * (t - center - width)))
+        elevator += sign * rng.uniform(0.130, 0.230) * pulse
+        thrust += -sign * rng.uniform(0.150, 0.360) * pulse
+
+    # Dedicated high-alpha probes deliberately enter the smooth stall region.
+    # These are separated from the random doublets so the benchmark contains
+    # repeatable off-nominal lift rollover and drag-rise data.
+    stall_probe_count = 7 if split == "train" else 6
+    centers = np.linspace(0.14 * duration, 0.82 * duration, stall_probe_count)
+    centers += rng.uniform(-0.030 * duration, 0.030 * duration, size=stall_probe_count)
+    for center in centers:
+        width = rng.uniform(3.0, 6.0)
+        pulse = 0.5 * (np.tanh(4.5 * (t - center)) - np.tanh(4.5 * (t - center - width)))
+        elevator += rng.uniform(0.360, 0.520) * pulse
+        thrust -= rng.uniform(0.300, 0.760) * pulse
+
+    # Slow throttle excursions create speed variation, which changes dynamic
+    # pressure and makes coefficient errors translate into different load errors.
+    for _ in range(3):
+        phase = rng.uniform(0.0, 2.0 * np.pi)
+        freq = rng.uniform(0.035, 0.10)
+        thrust += rng.uniform(0.14, 0.32) * np.sin(2.0 * np.pi * freq * t + phase)
+
+    return np.column_stack((np.clip(thrust, 0.08, 2.80), np.clip(elevator, -0.35, 0.35)))
 
 
 def actuator_step(u_prev: np.ndarray, u_cmd: np.ndarray, dt: float) -> np.ndarray:
@@ -441,6 +559,43 @@ def colored_disturbance(t: np.ndarray, dt: float, rng: np.random.Generator, enab
     return disturbance
 
 
+def sample_initial_state(
+    x_trim: np.ndarray,
+    rng: np.random.Generator,
+    dataset_mode: str,
+    split: Literal["train", "validation"],
+) -> np.ndarray:
+    if dataset_mode in {"aggressive", "sine_sweep"}:
+        validation_shift = split == "validation"
+        regimes = [
+            ((12.5, 18.0), (-3.0, 8.0), (-8.0, 8.0), (-35.0, 35.0)),
+            ((7.5, 11.5), (11.0, 20.0) if validation_shift else (9.0, 17.0), (-12.0, 16.0), (-30.0, 55.0)),
+            ((9.5, 15.0), (7.0, 16.0) if validation_shift else (5.0, 14.0), (10.0, 32.0), (20.0, 90.0)),
+            ((8.5, 16.0), (-2.0, 10.0), (-35.0, -8.0), (-95.0, -20.0)),
+            ((20.0, 29.0), (-5.0, 4.0), (-28.0, 5.0), (-50.0, 25.0)),
+        ]
+    elif dataset_mode in {"safe_loop", "sine_sweep_safe", "aggressive_safe", "proprietary_autopilot"}:
+        regimes = [
+            ((12.0, 18.0), (0.0, 8.0), (-10.0, 10.0), (-45.0, 45.0)),
+            ((8.5, 12.5), (7.0, 13.0), (-8.0, 16.0), (-50.0, 70.0)),
+            ((9.0, 17.0), (0.0, 10.0), (-25.0, -8.0), (-90.0, -20.0)),
+            ((19.0, 27.0), (-3.0, 4.0), (-20.0, 3.0), (-45.0, 25.0)),
+        ]
+    else:
+        spread = np.array([0.8, 0.025, 0.025, 0.040])
+        return x_trim + rng.uniform(-spread, spread)
+
+    v_range, alpha_deg_range, gamma_deg_range, q_deg_range = regimes[int(rng.integers(0, len(regimes)))]
+    return np.array(
+        [
+            rng.uniform(*v_range),
+            np.deg2rad(rng.uniform(*alpha_deg_range)),
+            np.deg2rad(rng.uniform(*gamma_deg_range)),
+            np.deg2rad(rng.uniform(*q_deg_range)),
+        ]
+    )
+
+
 def simulate_trial(
     *,
     split: Literal["train", "validation"],
@@ -455,16 +610,11 @@ def simulate_trial(
     t = make_time(config.duration, config.dt)
     x_trim = trim_state(aircraft, aero)
     u_trim = trim_controls(aircraft, aero, x_trim)
-    x0 = x_trim + np.array(
-        [
-            rng.uniform(-0.8, 0.8),
-            rng.uniform(-0.025, 0.025),
-            rng.uniform(-0.025, 0.025),
-            rng.uniform(-0.040, 0.040),
-        ]
-    )
+    x0 = sample_initial_state(x_trim, rng, config.dataset_mode, split)
     if config.dataset_mode in {"sine_sweep", "sine_sweep_safe"}:
         u_cmd = sine_sweep_command(t, u_trim, rng, split=split)
+    elif config.dataset_mode in {"aggressive", "aggressive_safe"}:
+        u_cmd = aggressive_command(t, u_trim, rng, split=split)
     elif config.dataset_mode in {"safe_loop", "proprietary_autopilot"}:
         u_cmd = recovery_probe_command(t, u_trim, rng, split=split)
     else:
@@ -479,13 +629,13 @@ def simulate_trial(
     x = np.empty((len(t), 4))
     x[0] = x0
     for k in range(len(t) - 1):
-        if config.dataset_mode in {"safe_loop", "open_loop_safe", "sine_sweep_safe", "proprietary_autopilot"}:
+        if config.dataset_mode in {"safe_loop", "open_loop_safe", "sine_sweep_safe", "aggressive_safe", "proprietary_autopilot"}:
             u_internal[k], autopilot_correction[k] = proprietary_autopilot_command(x[k], u_cmd[k], u_trim)
         u_act[k + 1] = actuator_step(u_act[k], u_internal[k], config.dt)
         x[k + 1] = rk4_step(x[k], u_act[k], u_act[k + 1], disturbance[k], disturbance[k + 1], aircraft, aero, config.dt, aero_scale)
         if not is_reasonable_state(x[k + 1]):
             raise FloatingPointError("simulation left the intended flight envelope")
-    if config.dataset_mode in {"safe_loop", "open_loop_safe", "sine_sweep_safe", "proprietary_autopilot"}:
+    if config.dataset_mode in {"safe_loop", "open_loop_safe", "sine_sweep_safe", "aggressive_safe", "proprietary_autopilot"}:
         u_internal[-1], autopilot_correction[-1] = proprietary_autopilot_command(x[-1], u_cmd[-1], u_trim)
 
     noise_std = np.asarray(config.measurement_noise)
@@ -528,7 +678,12 @@ def is_reasonable_state(x: np.ndarray) -> bool:
     if not np.all(np.isfinite(x)):
         return False
     v, alpha, gamma, q_rate = x
-    return 6.0 <= v <= 28.0 and abs(alpha) <= 0.40 and abs(gamma) <= 0.45 and abs(q_rate) <= 1.8
+    return (
+        MIN_ENVELOPE_SPEED <= v <= MAX_ENVELOPE_SPEED
+        and abs(alpha) <= MAX_ENVELOPE_ALPHA
+        and abs(gamma) <= MAX_ENVELOPE_GAMMA
+        and abs(q_rate) <= MAX_ENVELOPE_Q
+    )
 
 
 def evaluate_auxiliary_arrays(
@@ -629,7 +784,7 @@ def write_dataset(output_dir: Path, config: SimulationConfig, make_plot: bool = 
         "load_names": LOAD_NAMES.tolist(),
         "files": {"train": "train.npz", "validation": "validation.npz"},
         "notes": [
-            f"dataset_mode={config.dataset_mode}. safe_loop/open_loop_safe/sine_sweep_safe/proprietary_autopilot use a hidden SAFE/AS3X pitch input modifier; open_loop and sine_sweep use pilot commands with actuator lag only.",
+            f"dataset_mode={config.dataset_mode}. safe_loop/open_loop_safe/sine_sweep_safe/aggressive_safe/proprietary_autopilot use a hidden SAFE/AS3X pitch input modifier; open_loop, sine_sweep, and aggressive use pilot commands with actuator lag only.",
             "u_cmd is the commanded input; u_act is the actuator-realized input used by the simulator.",
             "autopilot_correction is written for diagnostic use only; practical identification should treat it as hidden.",
             "mocap_meas is the primary experimental measurement channel: inertial position and pitch attitude.",

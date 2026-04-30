@@ -586,39 +586,6 @@ def structured_sindy_coefficients_casadi(x, u, coeffs: list) -> ca.MX:
     return ca.vertcat(ca.dot(cl_features, coeffs[0]), ca.dot(cd_features, coeffs[1]), ca.dot(cm_features, coeffs[2]))
 
 
-def casadi_integrated_sindy_rk4_step(
-    x,
-    u0: np.ndarray,
-    u1: np.ndarray,
-    coeffs: list,
-    aircraft: Aircraft,
-    dt: float,
-    coeff_lower: np.ndarray,
-    coeff_upper: np.ndarray,
-):
-    def rhs(x_local, u_local):
-        coeff = structured_sindy_coefficients_casadi(x_local, u_local, coeffs)
-        coeff = ca.vertcat(
-            ca.fmin(ca.fmax(coeff[0], coeff_lower[0]), coeff_upper[0]),
-            ca.fmin(ca.fmax(coeff[1], coeff_lower[1]), coeff_upper[1]),
-            ca.fmin(ca.fmax(coeff[2], coeff_lower[2]), coeff_upper[2]),
-        )
-        return casadi_dynamics_from_coefficients(x_local, u_local, coeff, aircraft)
-
-    umid = 0.5 * (u0 + u1)
-    k1 = rhs(x, u0)
-    k2 = rhs(x + 0.5 * dt * k1, umid)
-    k3 = rhs(x + 0.5 * dt * k2, umid)
-    k4 = rhs(x + dt * k3, u1)
-    x_next = x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-    return ca.vertcat(
-        ca.fmin(ca.fmax(x_next[0], 3.0), 35.0),
-        ca.fmin(ca.fmax(x_next[1], -0.8), 0.8),
-        ca.fmin(ca.fmax(x_next[2], -0.8), 0.8),
-        ca.fmin(ca.fmax(x_next[3], -4.0), 4.0),
-    )
-
-
 def fit_koopman_edmd(
     train_x: np.ndarray,
     train_u: np.ndarray,
@@ -680,7 +647,8 @@ def run_koopman_edmd(
         train_samples=int(train_x.shape[0] * (train_x.shape[1] - 1)),
         notes=(
             "Uses the same polynomial/trigonometric library as SINDy, but fits a one-step lifted map "
-            "rather than sparse continuous-time derivatives."
+            "rather than sparse continuous-time derivatives; validation is open-loop from x0 and the "
+            "supplied pilot-command history."
         ),
         backend="NumPy EDMD",
     )
@@ -1417,103 +1385,6 @@ def run_sindy(xu: np.ndarray, dxdt: np.ndarray, validation: SplitData, args: arg
     return result, csv_names, csv_coeff
 
 
-def run_integrated_sindy(train: SplitData, xu: np.ndarray, dxdt: np.ndarray, validation: SplitData, args: argparse.Namespace) -> MethodResult:
-    start_wall = time.perf_counter()
-    start_cpu = time.process_time()
-    aircraft = Aircraft()
-    coeff_inferred = infer_coefficients(xu[:, :4], xu[:, 4:], dxdt, aircraft)
-    coeff_lower = np.quantile(coeff_inferred, 0.002, axis=0)
-    coeff_upper = np.quantile(coeff_inferred, 0.998, axis=0)
-    target = np.clip(coeff_inferred, coeff_lower, coeff_upper)
-    initial_coeffs, _names_by_output, initial_mse = fit_sindy(xu, target, args.sindy_threshold, args.sindy_ridge)
-    block_specs = structured_sindy_feature_blocks(xu[:1])
-    coefficient_sizes = [len(coeff) for coeff in initial_coeffs]
-    protected_masks = [spec[2] for spec in block_specs]
-    trial_count = min(args.max_integrated_sindy_trials, train.n_trials)
-    trial_ids = np.linspace(0, train.n_trials - 1, trial_count, dtype=int)
-    stride = max(1, int(args.integrated_sindy_stride))
-    t_fit = train.t[::stride]
-    noise = np.array([0.08, 0.0035, 0.0035, 0.012])
-    state_lower = np.array([5.0, -0.5, -0.45, -2.0])
-    state_upper = np.array([30.0, 0.5, 0.45, 2.0])
-
-    coeff_symbols = [ca.MX.sym(f"sindy_c_{idx}", size) for idx, size in enumerate(coefficient_sizes)]
-    x0_nodes = ca.MX.sym("x0_integrated_sindy", 4, trial_count)
-    variables = [*coeff_symbols, ca.reshape(x0_nodes, 4 * trial_count, 1)]
-    residuals = []
-    for local_idx, trial in enumerate(trial_ids):
-        x = x0_nodes[:, local_idx]
-        u = train.u_act[trial, ::stride]
-        y = train.y_meas[trial, ::stride]
-        for k in range(len(t_fit)):
-            for state_idx in range(4):
-                residuals.append((x[state_idx] - y[k, state_idx]) / noise[state_idx])
-            if k == len(t_fit) - 1:
-                continue
-            dt = float(t_fit[k + 1] - t_fit[k])
-            x = casadi_integrated_sindy_rk4_step(x, u[k], u[k + 1], coeff_symbols, aircraft, dt, coeff_lower, coeff_upper)
-
-    sparsity_penalty = ca.MX(0.0)
-    for coeff_symbol, protected in zip(coeff_symbols, protected_masks):
-        for idx, is_protected in enumerate(protected):
-            if not bool(is_protected):
-                sparsity_penalty += ca.sqrt(coeff_symbol[idx] ** 2 + 1e-8)
-
-    z = ca.vertcat(*variables)
-    objective = ca.sumsqr(ca.vertcat(*residuals)) + args.integrated_sindy_l1 * sparsity_penalty
-    solver = ca.nlpsol(
-        "integrated_sindy",
-        "ipopt",
-        {"x": z, "f": objective},
-        {
-            "ipopt.print_level": 0,
-            "ipopt.max_iter": args.max_integrated_sindy_nfev,
-            "ipopt.tol": 1e-5,
-            "print_time": False,
-        },
-    )
-    x0_guess = np.vstack([train.y_meas[trial, 0] for trial in trial_ids])
-    coefficient_guess = np.concatenate(initial_coeffs)
-    z0 = np.concatenate((coefficient_guess, np.clip(x0_guess, state_lower, state_upper).ravel(order="F")))
-    variable_coeff_lower = np.full_like(coefficient_guess, -20.0)
-    variable_coeff_upper = np.full_like(coefficient_guess, 20.0)
-    lower = np.concatenate((variable_coeff_lower, np.tile(state_lower, trial_count)))
-    upper = np.concatenate((variable_coeff_upper, np.tile(state_upper, trial_count)))
-
-    solution = solver(x0=np.clip(z0, lower, upper), lbx=lower, ubx=upper)
-    elapsed = time.perf_counter() - start_wall
-    cpu_elapsed = time.process_time() - start_cpu
-    z_hat = np.asarray(solution["x"]).ravel()
-    offset = 0
-    fitted_coeffs: list[np.ndarray] = []
-    for size in coefficient_sizes:
-        fitted_coeffs.append(z_hat[offset : offset + size])
-        offset += size
-
-    def coefficient_fn(x: np.ndarray, u: np.ndarray) -> np.ndarray:
-        coeff = structured_sindy_coefficients_np(x, u, fitted_coeffs)
-        return np.clip(coeff, coeff_lower, coeff_upper)
-
-    result = evaluate_method(
-        "Integrated-SINDy",
-        "Integrated output-error fit of the structured sparse aerodynamic coefficient library.",
-        elapsed,
-        int(trial_count * len(t_fit)),
-        int(sum(coefficient_sizes) + 4 * trial_count),
-        validation,
-        lambda _trial: lambda x, u: dynamics_from_coefficients(x, u, coefficient_fn(x, u), aircraft),
-        None,
-        (
-            f"CasADi/IPOPT trajectory-error fit over {trial_count} trials at stride {stride}; "
-            "uses the same protected aircraft terms and residual library as SINDy, but optimizes integrated rollout error rather than EOM-inferred coefficients."
-        ),
-    )
-    result.backend = "CasADi/IPOPT"
-    result.train_loss_final = float(solution["f"]) if "f" in solution else initial_mse
-    result.train_cpu_s = cpu_elapsed
-    return result
-
-
 def fit_symbolic_stepwise(xu: np.ndarray, dxdt: np.ndarray, max_terms: int, penalty: float, ridge: float) -> tuple[np.ndarray, list[str]]:
     theta_raw, names = sindy_library(xu)
     mean = theta_raw.mean(axis=0)
@@ -1614,7 +1485,138 @@ def run_linear_state_space(train_x: np.ndarray, train_u: np.ndarray, validation:
         validation_outputs=None,
         decision_variables=int(coeff.size),
         train_samples=len(xk),
-        notes="Captures local small-signal behavior but has no explicit aerodynamic interpretation.",
+        notes=(
+            "Validation is an open-loop rollout from x0 using the supplied pilot-command history only; "
+            "good scores indicate in-distribution discrete prediction, not aerodynamic interpretability."
+        ),
+    )
+
+
+def kmeans_labels(samples: np.ndarray, n_clusters: int, seed: int, max_iter: int = 40) -> tuple[np.ndarray, np.ndarray]:
+    n_clusters = max(1, min(int(n_clusters), len(samples)))
+    mean = samples.mean(axis=0)
+    scale = samples.std(axis=0)
+    scale[scale < 1e-9] = 1.0
+    z = (samples - mean) / scale
+    rng = np.random.default_rng(seed)
+    centers = z[rng.choice(len(z), size=n_clusters, replace=False)].copy()
+    labels = np.zeros(len(z), dtype=int)
+    for _ in range(max_iter):
+        dist2 = np.sum((z[:, None, :] - centers[None, :, :]) ** 2, axis=2)
+        new_labels = np.argmin(dist2, axis=1)
+        if np.array_equal(new_labels, labels):
+            break
+        labels = new_labels
+        for cluster in range(n_clusters):
+            cluster_samples = z[labels == cluster]
+            if len(cluster_samples):
+                centers[cluster] = cluster_samples.mean(axis=0)
+            else:
+                centers[cluster] = z[rng.integers(len(z))]
+    return labels, centers * scale + mean
+
+
+def fit_discrete_linear_model(xk: np.ndarray, uk: np.ndarray, xkp1: np.ndarray, ridge: float) -> np.ndarray:
+    features = np.column_stack((np.ones(len(xk)), xk, uk))
+    gram = features.T @ features + ridge * np.eye(features.shape[1])
+    rhs = features.T @ xkp1
+    return np.linalg.solve(gram, rhs)
+
+
+def run_model_stitching(train_x: np.ndarray, train_u: np.ndarray, validation: SplitData, args: argparse.Namespace) -> MethodResult:
+    start = time.perf_counter()
+    n_models = max(1, min(int(args.stitch_models), train_x.shape[0]))
+    labels, _initial_centers = kmeans_labels(train_x[:, 0, :], n_models, args.seed)
+    global_xk = train_x[:, :-1, :].reshape(-1, 4)
+    global_uk = train_u[:, :-1, :].reshape(-1, 2)
+    global_xkp1 = train_x[:, 1:, :].reshape(-1, 4)
+    global_coeff = fit_discrete_linear_model(global_xk, global_uk, global_xkp1, args.stitch_ridge)
+    coeffs = []
+    centers = []
+    one_step_errors = []
+    min_samples = max(8, 8 * (1 + train_x.shape[2] + train_u.shape[2]))
+    for model_idx in range(n_models):
+        trial_ids = np.flatnonzero(labels == model_idx)
+        if len(trial_ids):
+            xk = train_x[trial_ids, :-1, :].reshape(-1, 4)
+            uk = train_u[trial_ids, :-1, :].reshape(-1, 2)
+            xkp1 = train_x[trial_ids, 1:, :].reshape(-1, 4)
+        else:
+            xk = np.empty((0, 4))
+            uk = np.empty((0, 2))
+            xkp1 = np.empty((0, 4))
+        if len(xk) < min_samples:
+            coeff = global_coeff.copy()
+            xk = global_xk
+            uk = global_uk
+            xkp1 = global_xkp1
+        else:
+            coeff = fit_discrete_linear_model(xk, uk, xkp1, args.stitch_ridge)
+        coeffs.append(coeff)
+        centers.append(xk.mean(axis=0))
+        features = np.column_stack((np.ones(len(xk)), xk, uk))
+        one_step_errors.append(np.mean((features @ coeff - xkp1) ** 2))
+    coeffs_arr = np.asarray(coeffs)
+    centers_arr = np.asarray(centers)
+    state_scale = global_xk.std(axis=0)
+    state_scale[state_scale < 1e-9] = 1.0
+    if args.stitch_length_scale > 0.0:
+        length_scale = float(args.stitch_length_scale)
+    elif len(centers_arr) > 1:
+        center_z = (centers_arr - global_xk.mean(axis=0)) / state_scale
+        dist = np.sqrt(np.sum((center_z[:, None, :] - center_z[None, :, :]) ** 2, axis=2))
+        length_scale = float(np.median(dist[dist > 0.0])) if np.any(dist > 0.0) else 1.0
+    else:
+        length_scale = 1.0
+    length_scale = max(length_scale, 1e-3)
+    train_mse = float(np.mean(one_step_errors))
+    elapsed = time.perf_counter() - start
+
+    def step(x: np.ndarray, u: np.ndarray) -> np.ndarray:
+        z = np.concatenate(([1.0], x, u))
+        predictions = np.einsum("j,kjl->kl", z, coeffs_arr)
+        delta = (centers_arr - x) / state_scale
+        weights = np.exp(-0.5 * np.sum(delta**2, axis=1) / (length_scale**2))
+        weight_sum = np.sum(weights)
+        if not np.isfinite(weight_sum) or weight_sum <= 1e-12:
+            weights = np.zeros(len(centers_arr))
+            weights[int(np.argmin(np.sum(delta**2, axis=1)))] = 1.0
+        else:
+            weights = weights / weight_sum
+        x_next = weights @ predictions
+        x_next[0] = max(x_next[0], 3.0)
+        x_next[1:] = np.clip(x_next[1:], [-0.75, -1.2, -3.5], [0.75, 1.2, 3.5])
+        return x_next
+
+    start_rollout = time.perf_counter()
+    trajectories = np.empty_like(validation.x_true)
+    for trial in range(validation.n_trials):
+        x = np.empty((validation.n_time, 4))
+        x[0] = validation.y_meas[trial, 0]
+        for k in range(validation.n_time - 1):
+            x[k + 1] = step(x[k], validation.u_act[trial, k])
+            if not np.all(np.isfinite(x[k + 1])) or np.linalg.norm(x[k + 1]) > 1e4:
+                x[k + 1 :] = x[k]
+                break
+        trajectories[trial] = x
+    rollout_elapsed = time.perf_counter() - start_rollout
+    return MethodResult(
+        name="Model-Stitching",
+        description="Initial-condition clustered local linear state-space models blended by scheduling weights.",
+        train_elapsed_s=elapsed,
+        rollout_elapsed_s=rollout_elapsed,
+        validation_trajectories=trajectories,
+        validation_coeff_residual=None,
+        validation_outputs=None,
+        decision_variables=int(coeffs_arr.size + centers_arr.size + state_scale.size + 1),
+        train_samples=int(global_xk.shape[0]),
+        notes=(
+            f"Fits {n_models} local discrete linear models after clustering training trials by initial state; "
+            f"rollout blends local predictions with RBF weights in state space, length_scale={length_scale:.3g}. "
+            "Validation uses only x0 and the supplied pilot-command history."
+        ),
+        train_loss_final=train_mse,
+        backend="NumPy local models",
     )
 
 
@@ -2267,6 +2269,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--polyorder", type=int, default=3)
     parser.add_argument("--subspace-order", type=int, default=6)
     parser.add_argument("--subspace-past", type=int, default=12)
+    parser.add_argument("--stitch-models", type=int, default=6, help="number of local linear models for model stitching")
+    parser.add_argument("--stitch-ridge", type=float, default=1e-7, help="ridge regularization for each stitched local model")
+    parser.add_argument(
+        "--stitch-length-scale",
+        type=float,
+        default=0.0,
+        help="RBF scheduling length scale in normalized state space; 0 uses median local-center distance",
+    )
     parser.add_argument("--ekf-process-std", type=float, nargs=4, default=[0.05, 0.002, 0.002, 0.01])
     parser.add_argument("--ekf-measurement-std", type=float, nargs=4, default=[0.12, 0.006, 0.006, 0.02])
     parser.add_argument("--ekf-initial-std", type=float, nargs=4, default=[0.3, 0.02, 0.02, 0.05])
@@ -2286,10 +2296,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vi-position-process-noise", type=float, default=0.02)
     parser.add_argument("--sindy-threshold", type=float, default=0.04)
     parser.add_argument("--sindy-ridge", type=float, default=1e-6)
-    parser.add_argument("--max-integrated-sindy-trials", type=int, default=2)
-    parser.add_argument("--integrated-sindy-stride", type=int, default=20)
-    parser.add_argument("--max-integrated-sindy-nfev", type=int, default=35)
-    parser.add_argument("--integrated-sindy-l1", type=float, default=1e-3)
     parser.add_argument("--symbolic-max-terms", type=int, default=5)
     parser.add_argument("--symbolic-penalty", type=float, default=1.0)
     parser.add_argument("--symbolic-ridge", type=float, default=1e-6)
@@ -2329,6 +2335,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fig-dir", type=Path, default=FIG_DIR)
     parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
     parser.add_argument("--table-dir", type=Path, default=TABLE_DIR)
+    parser.add_argument("--include-methods", nargs="*", default=["all"], help="method rows to run; default runs all")
     return parser.parse_args()
 
 
@@ -2371,6 +2378,10 @@ def main() -> int:
     last_sindy_coeff: np.ndarray | None = None
     last_symbolic_names: list[str] | None = None
     last_symbolic_coeff: np.ndarray | None = None
+    include_methods = set(args.include_methods or ["all"])
+
+    def wants(method_name: str) -> bool:
+        return "all" in include_methods or method_name in include_methods
 
     for source in source_names:
         train = raw_train
@@ -2389,49 +2400,77 @@ def main() -> int:
         x_smooth, dxdt = smooth_trials(train.y_meas, train.dt, local_args.smooth_window, local_args.polyorder)
         xu, deriv, coeff_res = flatten_samples(train, x_smooth, dxdt, local_args.max_samples, local_args.seed)
 
-        results: list[MethodResult] = [
-            run_logged("Nominal", lambda: run_nominal(validation)),
-            run_logged("Linear-SS", lambda: run_linear_state_space(x_smooth, train.u_act, validation)),
-            run_logged("Koopman-EDMD", lambda: run_koopman_edmd(x_smooth, train.u_act, validation, local_args)),
-            run_logged("Subspace-Hankel", lambda: run_subspace_hankel(x_smooth, train.u_act, validation, local_args)),
-            run_logged("Frequency-Welch", lambda: run_frequency_linear(x_smooth, train.u_act, dxdt, validation, local_args)),
-            run_logged("EquationError-LS", lambda: run_equation_error(xu, deriv, validation)),
-            run_logged("EKF-ParamID", lambda: run_filter_error_ekf(train, xu, deriv, validation, local_args)),
-        ]
-        theta_uq = fit_equation_error(xu, deriv)
-        all_uq_rows.extend(run_logged("Fisher-UQ", lambda: fisher_uq_diagnostics(train, theta_uq, source, "EquationError-LS", local_args)))
+        results: list[MethodResult] = []
+        pinn_result: MethodResult | None = None
+        if wants("Nominal"):
+            results.append(run_logged("Nominal", lambda: run_nominal(validation)))
+        if wants("Linear-SS"):
+            results.append(run_logged("Linear-SS", lambda: run_linear_state_space(x_smooth, train.u_act, validation)))
+        if wants("Model-Stitching"):
+            results.append(run_logged("Model-Stitching", lambda: run_model_stitching(x_smooth, train.u_act, validation, local_args)))
+        if wants("Koopman-EDMD"):
+            results.append(run_logged("Koopman-EDMD", lambda: run_koopman_edmd(x_smooth, train.u_act, validation, local_args)))
+        if wants("Subspace-Hankel"):
+            results.append(run_logged("Subspace-Hankel", lambda: run_subspace_hankel(x_smooth, train.u_act, validation, local_args)))
+        if wants("Frequency-Welch"):
+            results.append(run_logged("Frequency-Welch", lambda: run_frequency_linear(x_smooth, train.u_act, dxdt, validation, local_args)))
+        if wants("EquationError-LS"):
+            results.append(run_logged("EquationError-LS", lambda: run_equation_error(xu, deriv, validation)))
+        if wants("EKF-ParamID"):
+            results.append(run_logged("EKF-ParamID", lambda: run_filter_error_ekf(train, xu, deriv, validation, local_args)))
+        if wants("Fisher-UQ"):
+            theta_uq = fit_equation_error(xu, deriv)
+            all_uq_rows.extend(run_logged("Fisher-UQ", lambda: fisher_uq_diagnostics(train, theta_uq, source, "EquationError-LS", local_args)))
         if not local_args.skip_oem:
-            results.append(run_logged("OEM-SS", lambda: run_oem(train, validation, local_args)))
-            results.append(run_logged("OEM-MocapOutput", lambda: run_oem_mocap_output(train, validation, local_args)))
-            results.append(run_logged("Variational-Mocap", lambda: run_variational_mocap_output(train, validation, local_args)))
-            if local_args.input_channel == "u_cmd" and has_hidden_controller:
+            if wants("OEM-SS"):
+                results.append(run_logged("OEM-SS", lambda: run_oem(train, validation, local_args)))
+            if wants("OEM-MocapOutput"):
+                results.append(run_logged("OEM-MocapOutput", lambda: run_oem_mocap_output(train, validation, local_args)))
+            if wants("Variational-Mocap"):
+                results.append(run_logged("Variational-Mocap", lambda: run_variational_mocap_output(train, validation, local_args)))
+            if wants("OEM-HiddenController") and local_args.input_channel == "u_cmd" and has_hidden_controller:
                 results.append(run_logged("OEM-HiddenController", lambda: run_oem_hidden_controller(train, validation, local_args)))
-        sindy_result, sindy_names, sindy_coeff = run_logged("SINDy", lambda: run_sindy(xu, deriv, validation, local_args))
-        results.append(sindy_result)
-        results.append(run_logged("Integrated-SINDy", lambda: run_integrated_sindy(train, xu, deriv, validation, local_args)))
-        symbolic_result, symbolic_names, symbolic_coeff = run_logged(
-            "Symbolic-Stepwise",
-            lambda: run_symbolic_regression(xu, deriv, validation, local_args),
-        )
-        results.append(symbolic_result)
-        gp_result = run_logged("GP-CoeffClosure", lambda: run_gp_coeff_closure(xu, deriv, validation, local_args))
-        results.append(gp_result)
-        ude_result, ude_history = run_logged("UDE-Residual", lambda: run_ude(xu, deriv, validation, local_args, device))
-        results.append(ude_result)
-        pinn_result, pinn_history = run_logged("PINN-CoeffClosure", lambda: run_pinn_closure(xu, deriv, validation, local_args, device))
-        results.append(pinn_result)
-        hidden_ude_result, hidden_ude_history = run_logged(
-            "UDE-HiddenControl",
-            lambda: run_ude_hidden_control(xu, deriv, validation, local_args, device),
-        )
-        results.append(hidden_ude_result)
-        hidden_pinn_result, hidden_pinn_history = run_logged(
-            "PINN-HiddenElevator",
-            lambda: run_pinn_hidden_control(xu, deriv, validation, local_args, device),
-        )
-        results.append(hidden_pinn_result)
-        surrogate_result, surrogate_history = run_logged("NN-CoeffSurrogate", lambda: run_supervised_coeff_surrogate(xu, coeff_res, validation, local_args, device))
-        results.append(surrogate_result)
+        if wants("SINDy"):
+            sindy_result, sindy_names, sindy_coeff = run_logged("SINDy", lambda: run_sindy(xu, deriv, validation, local_args))
+            results.append(sindy_result)
+            last_sindy_names = sindy_names
+            last_sindy_coeff = sindy_coeff
+        if wants("Symbolic-Stepwise"):
+            symbolic_result, symbolic_names, symbolic_coeff = run_logged(
+                "Symbolic-Stepwise",
+                lambda: run_symbolic_regression(xu, deriv, validation, local_args),
+            )
+            results.append(symbolic_result)
+            last_symbolic_names = symbolic_names
+            last_symbolic_coeff = symbolic_coeff
+        if wants("GP-CoeffClosure"):
+            results.append(run_logged("GP-CoeffClosure", lambda: run_gp_coeff_closure(xu, deriv, validation, local_args)))
+        if wants("UDE-Residual"):
+            ude_result, ude_history = run_logged("UDE-Residual", lambda: run_ude(xu, deriv, validation, local_args, device))
+            results.append(ude_result)
+            histories[f"{source}_ude_residual"] = ude_history
+        if wants("PINN-CoeffClosure"):
+            pinn_result, pinn_history = run_logged("PINN-CoeffClosure", lambda: run_pinn_closure(xu, deriv, validation, local_args, device))
+            results.append(pinn_result)
+            histories[f"{source}_pinn_coeff_closure"] = pinn_history
+        if wants("UDE-HiddenControl"):
+            hidden_ude_result, hidden_ude_history = run_logged(
+                "UDE-HiddenControl",
+                lambda: run_ude_hidden_control(xu, deriv, validation, local_args, device),
+            )
+            results.append(hidden_ude_result)
+            histories[f"{source}_ude_hidden_control"] = hidden_ude_history
+        if wants("PINN-HiddenElevator"):
+            hidden_pinn_result, hidden_pinn_history = run_logged(
+                "PINN-HiddenElevator",
+                lambda: run_pinn_hidden_control(xu, deriv, validation, local_args, device),
+            )
+            results.append(hidden_pinn_result)
+            histories[f"{source}_pinn_hidden_elevator"] = hidden_pinn_history
+        if wants("NN-CoeffSurrogate"):
+            surrogate_result, surrogate_history = run_logged("NN-CoeffSurrogate", lambda: run_supervised_coeff_surrogate(xu, coeff_res, validation, local_args, device))
+            results.append(surrogate_result)
+            histories[f"{source}_nn_coeff_surrogate"] = surrogate_history
 
         rows = summarize_results(results, validation)
         for row in rows:
@@ -2444,27 +2483,22 @@ def main() -> int:
             for row in rows:
                 row["state_source"] = source
         all_rows.extend(rows)
-        histories[f"{source}_ude_residual"] = ude_history
-        histories[f"{source}_pinn_coeff_closure"] = pinn_history
-        histories[f"{source}_ude_hidden_control"] = hidden_ude_history
-        histories[f"{source}_pinn_hidden_elevator"] = hidden_pinn_history
-        histories[f"{source}_nn_coeff_surrogate"] = surrogate_history
-        last_sindy_names = sindy_names
-        last_sindy_coeff = sindy_coeff
-        last_symbolic_names = symbolic_names
-        last_symbolic_coeff = symbolic_coeff
-        plot_results = results
-        plot_validation = validation
-        coeff_plot_result = pinn_result
+        if results:
+            plot_results = results
+            plot_validation = validation
+        if pinn_result is not None:
+            coeff_plot_result = pinn_result
 
-    write_rows(all_rows)
+    if all_rows:
+        write_rows(all_rows)
     if last_sindy_names is not None and last_sindy_coeff is not None:
         write_sindy_coefficients(last_sindy_names, last_sindy_coeff)
     if last_symbolic_names is not None and last_symbolic_coeff is not None:
         write_symbolic_coefficients(last_symbolic_names, last_symbolic_coeff)
     write_uq_diagnostics(all_uq_rows)
     write_histories(histories)
-    plot_comparison(all_rows)
+    if all_rows:
+        plot_comparison(all_rows)
     if plot_results is not None and plot_validation is not None:
         ordered_results = sorted(
             plot_results,

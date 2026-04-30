@@ -22,7 +22,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=7, help="random seed")
     parser.add_argument(
         "--dataset-mode",
-        choices=["open_loop", "sine_sweep", "safe_loop", "open_loop_safe", "sine_sweep_safe", "proprietary_autopilot"],
+        choices=[
+            "open_loop",
+            "sine_sweep",
+            "aggressive",
+            "safe_loop",
+            "open_loop_safe",
+            "sine_sweep_safe",
+            "aggressive_safe",
+            "proprietary_autopilot",
+        ],
         default="open_loop",
         help="experiment design used to generate commands and inputs",
     )
