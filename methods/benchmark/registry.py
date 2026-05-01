@@ -95,7 +95,7 @@ def builtin_method_metadata() -> list[MethodMetadata]:
                 entry_point="models.aircraft6dof.comparison_suite:builtin",
                 model_families=("aircraft6dof",),
                 observation_types=observation_types,
-                training_scenarios=("aircraft_6dof_mixed",),
+                training_scenarios=("aircraft_6dof_open_loop", "aircraft_6dof_sine_sweep", "aircraft_6dof_aggressive", "aircraft_6dof_trim_grid"),
                 requires_gpu=False,
                 description="Built-in 6DOF baseline dispatched by methods/models/aircraft6dof/comparison_suite.py.",
             )

@@ -1,5 +1,5 @@
 {
-  "dataset": "/home/jgoppert/git/system_identification/methods/data/aircraft_6dof_mixed",
+  "dataset": "/home/jgoppert/git/system_identification/methods/data/aircraft_6dof_aggressive",
   "methods": [
     "6DOF-EKF-ParamID",
     "6DOF-EquationError-LS",

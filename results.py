@@ -59,6 +59,19 @@ DATASET_TITLES = {
     "safe_loop": "Aggressive SAFE recovery-probe maneuver",
     "proprietary_autopilot": "Hidden-controller maneuver",
 }
+SIX_DOF_DATASET_MODES = ("open_loop", "sine_sweep", "aggressive", "trim_grid")
+SIX_DOF_DATASET_OUTPUTS = {
+    "open_loop": METHODS / "data" / "aircraft_6dof_open_loop",
+    "sine_sweep": METHODS / "data" / "aircraft_6dof_sine_sweep",
+    "aggressive": METHODS / "data" / "aircraft_6dof_aggressive",
+    "trim_grid": METHODS / "data" / "aircraft_6dof_trim_grid",
+}
+SIX_DOF_DATASET_TITLES = {
+    "open_loop": "6-DOF open-loop maneuver",
+    "sine_sweep": "6-DOF sine-sweep maneuver",
+    "aggressive": "6-DOF aggressive nonlinear stall maneuver",
+    "trim_grid": "6-DOF local trim-grid small-deviation maneuver",
+}
 METHOD_WORKERS = (
     "Nominal",
     "Linear-SS",
@@ -1166,28 +1179,31 @@ def simulate(args: argparse.Namespace) -> None:
 
 
 def simulate_6dof(args: argparse.Namespace) -> None:
-    command = [
-        sys.executable,
-        "-m",
-        "models.aircraft6dof.generate_dataset",
-        "--output",
-        str(args.output),
-        "--train-trials",
-        str(args.train_trials),
-        "--validation-trials",
-        str(args.validation_trials),
-        "--duration",
-        str(args.duration),
-        "--dt",
-        str(args.dt),
-        "--seed",
-        str(args.seed),
-        "--dataset-mode",
-        args.dataset_mode,
-    ]
-    if args.no_plot:
-        command.append("--no-plot")
-    run(command, cwd=METHODS)
+    modes = list(getattr(args, "dataset_modes", None) or [args.dataset_mode])
+    for mode in modes:
+        output = args.output if len(modes) == 1 and getattr(args, "output", None) is not None else SIX_DOF_DATASET_OUTPUTS[mode]
+        command = [
+            sys.executable,
+            "-m",
+            "models.aircraft6dof.generate_dataset",
+            "--output",
+            str(output),
+            "--train-trials",
+            str(args.train_trials),
+            "--validation-trials",
+            str(args.validation_trials),
+            "--duration",
+            str(args.duration),
+            "--dt",
+            str(args.dt),
+            "--seed",
+            str(args.seed),
+            "--dataset-mode",
+            mode,
+        ]
+        if args.no_plot:
+            command.append("--no-plot")
+        run(command, cwd=METHODS)
 
 
 def suite_6dof(args: argparse.Namespace) -> None:
@@ -1217,9 +1233,10 @@ def suite_6dof(args: argparse.Namespace) -> None:
 
 def all_6dof(args: argparse.Namespace) -> None:
     simulate_6dof(args)
+    dataset = args.output if getattr(args, "output", None) is not None else SIX_DOF_DATASET_OUTPUTS[args.dataset_mode]
     suite_6dof(
         argparse.Namespace(
-            dataset=args.output,
+            dataset=dataset,
             state_source=args.state_source,
             ridge=args.ridge,
             workers=args.workers,
@@ -1796,18 +1813,19 @@ def parse_args() -> argparse.Namespace:
     p_sim.set_defaults(func=simulate)
 
     p_sim6 = sub.add_parser("simulate-6dof", help="generate the 6DOF train/validation dataset")
-    p_sim6.add_argument("--output", type=Path, default=METHODS / "data" / "aircraft_6dof_mixed")
+    p_sim6.add_argument("--output", type=Path, default=None, help="single-mode output directory; ignored when multiple --dataset-modes are selected")
     p_sim6.add_argument("--train-trials", type=int, default=32)
     p_sim6.add_argument("--validation-trials", type=int, default=8)
     p_sim6.add_argument("--duration", type=float, default=12.0)
     p_sim6.add_argument("--dt", type=float, default=0.02)
     p_sim6.add_argument("--seed", type=int, default=17)
-    p_sim6.add_argument("--dataset-mode", choices=["mixed", "aggressive", "near_trim"], default="mixed")
+    p_sim6.add_argument("--dataset-mode", choices=list(SIX_DOF_DATASET_MODES), default="aggressive", help="single 6DOF mode used when --dataset-modes is omitted")
+    p_sim6.add_argument("--dataset-modes", nargs="+", choices=list(SIX_DOF_DATASET_MODES), default=None, help="generate several 6DOF modes into their standard data directories")
     p_sim6.add_argument("--no-plot", action="store_true")
     p_sim6.set_defaults(func=simulate_6dof)
 
     p_suite6 = sub.add_parser("suite-6dof", help="run baseline methods on the 6DOF train/validation dataset")
-    p_suite6.add_argument("--dataset", type=Path, default=METHODS / "data" / "aircraft_6dof_mixed")
+    p_suite6.add_argument("--dataset", type=Path, default=SIX_DOF_DATASET_OUTPUTS["aggressive"])
     p_suite6.add_argument("--state-source", choices=["direct", "mocap", "both"], default="both")
     p_suite6.add_argument("--ridge", type=float, default=1e-5)
     p_suite6.add_argument("--workers", type=int, default=max(1, min(30, (os.cpu_count() or 2) - 2)))
@@ -1815,13 +1833,13 @@ def parse_args() -> argparse.Namespace:
     p_suite6.set_defaults(func=suite_6dof)
 
     p_all6 = sub.add_parser("all-6dof", help="generate 6DOF data, run baseline methods, export LaTeX/site assets, and optionally build")
-    p_all6.add_argument("--output", type=Path, default=METHODS / "data" / "aircraft_6dof_mixed")
+    p_all6.add_argument("--output", type=Path, default=None)
     p_all6.add_argument("--train-trials", type=int, default=256)
     p_all6.add_argument("--validation-trials", type=int, default=64)
     p_all6.add_argument("--duration", type=float, default=20.0)
     p_all6.add_argument("--dt", type=float, default=0.02)
     p_all6.add_argument("--seed", type=int, default=17)
-    p_all6.add_argument("--dataset-mode", choices=["mixed", "aggressive", "near_trim"], default="mixed")
+    p_all6.add_argument("--dataset-mode", choices=list(SIX_DOF_DATASET_MODES), default="aggressive")
     p_all6.add_argument("--state-source", choices=["direct", "mocap", "both"], default="both")
     p_all6.add_argument("--ridge", type=float, default=1e-5)
     p_all6.add_argument("--workers", type=int, default=max(1, min(30, (os.cpu_count() or 2) - 2)))

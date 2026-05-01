@@ -3,8 +3,8 @@
     "maneuver_summary": "maneuver_summary.json",
     "method_results": "method_results.json"
   },
-  "generated_at": "2026-05-01T04:29:07.190721+00:00",
-  "git_sha": "95a73e0e3e2582a32fb701102f2bc1c28ef783b6",
+  "generated_at": "2026-05-01T05:00:08.654977+00:00",
+  "git_sha": "6fda74ec80aa97ccc787c06cf321290826c14961",
   "method_registry": [
     {
       "description": "Built-in 6DOF baseline dispatched by methods/models/aircraft6dof/comparison_suite.py.",
@@ -19,7 +19,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -35,7 +38,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -51,7 +57,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -67,7 +76,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -83,7 +95,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -99,7 +114,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -115,7 +133,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -131,7 +152,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -147,7 +171,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -163,7 +190,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -179,7 +209,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -194,7 +227,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -210,7 +246,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -226,7 +265,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -242,7 +284,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -258,7 +303,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -274,7 +322,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -290,7 +341,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -306,7 +360,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -322,7 +379,10 @@
       ],
       "requires_gpu": false,
       "training_scenarios": [
-        "aircraft_6dof_mixed"
+        "aircraft_6dof_open_loop",
+        "aircraft_6dof_sine_sweep",
+        "aircraft_6dof_aggressive",
+        "aircraft_6dof_trim_grid"
       ]
     },
     {
@@ -750,10 +810,28 @@
       "title": "Aggressive SAFE recovery-probe maneuver"
     },
     {
-      "id": "aircraft_6dof_mixed",
+      "id": "aircraft_6dof_open_loop",
+      "method_result_count": 0,
+      "model_family": "aircraft6dof",
+      "title": "6-DOF open-loop maneuver"
+    },
+    {
+      "id": "aircraft_6dof_sine_sweep",
+      "method_result_count": 0,
+      "model_family": "aircraft6dof",
+      "title": "6-DOF sine-sweep maneuver"
+    },
+    {
+      "id": "aircraft_6dof_aggressive",
       "method_result_count": 39,
       "model_family": "aircraft6dof",
-      "title": "6-DOF mixed maneuver"
+      "title": "6-DOF aggressive nonlinear stall maneuver"
+    },
+    {
+      "id": "aircraft_6dof_trim_grid",
+      "method_result_count": 0,
+      "model_family": "aircraft6dof",
+      "title": "6-DOF local trim-grid small-deviation maneuver"
     }
   ],
   "schema_version": "0.1.0"

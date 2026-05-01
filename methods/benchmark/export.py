@@ -47,6 +47,12 @@ NUMERIC_FIELDS = {
     "max_speed_mps",
     "vertical_extent_m",
 }
+SIX_DOF_SCENARIOS = {
+    "aircraft_6dof_open_loop": "6-DOF open-loop maneuver",
+    "aircraft_6dof_sine_sweep": "6-DOF sine-sweep maneuver",
+    "aircraft_6dof_aggressive": "6-DOF aggressive nonlinear stall maneuver",
+    "aircraft_6dof_trim_grid": "6-DOF local trim-grid small-deviation maneuver",
+}
 
 
 def _git_sha(root: Path) -> str | None:
@@ -119,10 +125,11 @@ def _six_dof_rows(results_dir: Path) -> list[dict[str, Any]]:
         for key, value in raw.items():
             if key not in record:
                 record[key] = _coerce_value(key, value)
-        record["scenario"] = "aircraft_6dof_mixed"
-        record["scenario_title"] = "6-DOF mixed maneuver"
+        scenario = str(record.get("training_scenario") or "aircraft_6dof_aggressive")
+        record["scenario"] = scenario
+        record["scenario_title"] = SIX_DOF_SCENARIOS.get(scenario, scenario.replace("_", " ").title())
         record["model_family"] = MODEL_FAMILY_6DOF
-        record["training_scenario"] = "aircraft_6dof_mixed"
+        record["training_scenario"] = scenario
         rows.append(record)
     return rows
 
@@ -167,13 +174,13 @@ def export_web_data(
         }
         for scenario in dataset_modes
     ]
-    if any(row.get("model_family") == MODEL_FAMILY_6DOF for row in method_rows):
+    for scenario, title in SIX_DOF_SCENARIOS.items():
         scenarios.append(
             {
-                "id": "aircraft_6dof_mixed",
-                "title": "6-DOF mixed maneuver",
+                "id": scenario,
+                "title": title,
                 "model_family": MODEL_FAMILY_6DOF,
-                "method_result_count": sum(1 for row in method_rows if row.get("scenario") == "aircraft_6dof_mixed"),
+                "method_result_count": sum(1 for row in method_rows if row.get("scenario") == scenario),
             }
         )
     method_registry = [metadata_to_dict(method) for method in all_method_metadata(root / "methods" / "plugins")]

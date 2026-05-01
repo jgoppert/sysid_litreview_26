@@ -25,40 +25,86 @@ from .model import (
 
 
 METHODS_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_OUTPUT = METHODS_ROOT / "data" / "aircraft_6dof_mixed"
+DEFAULT_OUTPUT = METHODS_ROOT / "data" / "aircraft_6dof_aggressive"
 MOCAP_NAMES = ("x_n", "y_e", "z_d", "q_w", "q_x", "q_y", "q_z")
 EULER_NAMES = ("roll", "pitch", "yaw")
+DATASET_MODES = ("open_loop", "sine_sweep", "aggressive", "trim_grid", "mixed", "near_trim")
 
 
 def _time(config: Aircraft6DOFConfig) -> np.ndarray:
     return np.arange(0.0, config.duration + 0.5 * config.dt, config.dt)
 
 
-def _initial_state(rng: np.random.Generator, config: Aircraft6DOFConfig, aggressive: bool) -> np.ndarray:
+def _mode_family(mode: str) -> str:
+    aliases = {"mixed": "aggressive", "near_trim": "open_loop"}
+    return aliases.get(mode, mode)
+
+
+def _initial_state(rng: np.random.Generator, config: Aircraft6DOFConfig, mode: str) -> np.ndarray:
+    family = _mode_family(mode)
     x0 = np.zeros(len(STATE_NAMES))
-    speed_spread = 3.0 if aggressive else 0.9
-    x0[3] = config.wing_speed + rng.normal(0.0, speed_spread)
-    alpha0 = rng.normal(np.deg2rad(4.0), np.deg2rad(9.0 if aggressive else 2.0))
-    beta0 = rng.normal(0.0, np.deg2rad(7.0 if aggressive else 1.5))
+    if family == "trim_grid":
+        x0[3] = float(rng.choice([11.5, 14.5, 17.5, 20.5])) + rng.normal(0.0, 0.25)
+        alpha0 = float(rng.choice(np.deg2rad([-6.0, 0.0, 6.0, 11.0]))) + rng.normal(0.0, np.deg2rad(0.8))
+        beta0 = float(rng.choice(np.deg2rad([-5.0, 0.0, 5.0]))) + rng.normal(0.0, np.deg2rad(0.6))
+        euler_spread = [0.05, 0.04, 0.10]
+        rate_spread = [0.06, 0.05, 0.05]
+    elif family == "aggressive":
+        x0[3] = config.wing_speed + rng.normal(0.0, 3.0)
+        alpha0 = rng.normal(np.deg2rad(4.0), np.deg2rad(9.0))
+        beta0 = rng.normal(0.0, np.deg2rad(7.0))
+        euler_spread = [0.35, 0.24, 0.45]
+        rate_spread = [0.55, 0.36, 0.42]
+    elif family == "sine_sweep":
+        x0[3] = config.wing_speed + rng.normal(0.0, 1.2)
+        alpha0 = rng.normal(np.deg2rad(3.0), np.deg2rad(2.5))
+        beta0 = rng.normal(0.0, np.deg2rad(2.0))
+        euler_spread = [0.08, 0.06, 0.12]
+        rate_spread = [0.08, 0.07, 0.07]
+    else:
+        x0[3] = config.wing_speed + rng.normal(0.0, 0.9)
+        alpha0 = rng.normal(np.deg2rad(3.0), np.deg2rad(1.8))
+        beta0 = rng.normal(0.0, np.deg2rad(1.5))
+        euler_spread = [0.04, 0.03, 0.08]
+        rate_spread = [0.06, 0.05, 0.05]
     x0[4] = x0[3] * np.tan(beta0)
     x0[5] = x0[3] * np.tan(alpha0)
-    euler0 = rng.normal(0.0, [0.35, 0.24, 0.45] if aggressive else [0.04, 0.03, 0.08])
+    euler0 = rng.normal(0.0, euler_spread)
     x0[6:10] = quaternion_from_euler(euler0)
-    x0[10:13] = rng.normal(0.0, [0.55, 0.36, 0.42] if aggressive else [0.06, 0.05, 0.05])
+    x0[10:13] = rng.normal(0.0, rate_spread)
     return x0
 
 
 def _command(t: np.ndarray, rng: np.random.Generator, mode: str) -> np.ndarray:
-    aggressive = mode in {"mixed", "aggressive"}
-    amp = np.array([0.22, 0.44, 0.48, 0.36]) if aggressive else np.array([0.06, 0.07, 0.08, 0.05])
+    family = _mode_family(mode)
     bias = np.array([0.62, 0.0, 0.0, 0.0])
-    freq = rng.uniform([0.16, 0.30, 0.25, 0.30], [0.65, 1.10, 1.05, 1.05])
-    phase = rng.uniform(0.0, 2.0 * np.pi, size=4)
     u = np.zeros((len(t), len(INPUT_NAMES)))
-    for index in range(4):
-        u[:, index] = bias[index] + amp[index] * np.sin(freq[index] * t + phase[index])
-        u[:, index] += 0.35 * amp[index] * np.sin(2.3 * freq[index] * t + 0.7 * phase[index])
-    if aggressive:
+    if family == "trim_grid":
+        amp = np.array([0.035, 0.045, 0.050, 0.040])
+        freq = rng.uniform([0.35, 0.45, 0.40, 0.40], [0.95, 1.15, 1.10, 1.10])
+        phase = rng.uniform(0.0, 2.0 * np.pi, size=4)
+        trim_bias = bias.copy()
+        trim_bias[0] += rng.normal(0.0, 0.08)
+        for index in range(4):
+            u[:, index] = trim_bias[index] + amp[index] * np.sin(freq[index] * t + phase[index])
+            u[:, index] += 0.25 * amp[index] * np.sin(2.1 * freq[index] * t + 0.5 * phase[index])
+    elif family == "sine_sweep":
+        amp = np.array([0.14, 0.28, 0.30, 0.22])
+        duration = max(float(t[-1]), 1e-6)
+        phase = rng.uniform(0.0, 2.0 * np.pi, size=4)
+        f0 = rng.uniform([0.05, 0.08, 0.07, 0.07], [0.10, 0.16, 0.14, 0.14])
+        f1 = rng.uniform([0.55, 0.85, 0.80, 0.75], [0.90, 1.45, 1.35, 1.25])
+        tau = t / duration
+        chirp_phase = 2.0 * np.pi * duration * (f0[None, :] * tau[:, None] + 0.5 * (f1 - f0)[None, :] * tau[:, None] ** 2)
+        u[:] = bias + amp * np.sin(chirp_phase + phase)
+        u += 0.20 * amp * np.sin(0.47 * chirp_phase + 0.3 * phase)
+    elif family == "aggressive":
+        amp = np.array([0.22, 0.44, 0.48, 0.36])
+        freq = rng.uniform([0.16, 0.30, 0.25, 0.30], [0.65, 1.10, 1.05, 1.05])
+        phase = rng.uniform(0.0, 2.0 * np.pi, size=4)
+        for index in range(4):
+            u[:, index] = bias[index] + amp[index] * np.sin(freq[index] * t + phase[index])
+            u[:, index] += 0.35 * amp[index] * np.sin(2.3 * freq[index] * t + 0.7 * phase[index])
         for center in rng.uniform(0.10 * t[-1], 0.90 * t[-1], size=5):
             width = rng.uniform(0.45, 1.20)
             pulse = np.exp(-0.5 * ((t - center) / width) ** 2)
@@ -73,6 +119,13 @@ def _command(t: np.ndarray, rng: np.random.Generator, mode: str) -> np.ndarray:
             unload = np.exp(-0.5 * ((t - center - 1.15 * width) / (0.75 * width)) ** 2)
             u[:, 1] += rng.choice([-1.0, 1.0]) * (0.48 * pull - 0.26 * unload)
             u[:, 0] += 0.18 * pull - 0.12 * unload
+    else:
+        amp = np.array([0.06, 0.07, 0.08, 0.05])
+        freq = rng.uniform([0.16, 0.30, 0.25, 0.30], [0.65, 1.10, 1.05, 1.05])
+        phase = rng.uniform(0.0, 2.0 * np.pi, size=4)
+        for index in range(4):
+            u[:, index] = bias[index] + amp[index] * np.sin(freq[index] * t + phase[index])
+            u[:, index] += 0.35 * amp[index] * np.sin(2.3 * freq[index] * t + 0.7 * phase[index])
     lower = np.array([0.02, -0.70, -0.80, -0.65])
     upper = np.array([1.00, 0.70, 0.80, 0.65])
     return np.clip(u, lower, upper)
@@ -90,12 +143,11 @@ def _actuator_response(u_cmd: np.ndarray, dt: float) -> np.ndarray:
 
 def _simulate_trial(rng: np.random.Generator, config: Aircraft6DOFConfig, split: str) -> dict[str, np.ndarray]:
     t = _time(config)
-    aggressive = config.dataset_mode in {"mixed", "aggressive"}
-    mode = "aggressive" if aggressive or split == "validation" else config.dataset_mode
+    mode = _mode_family(config.dataset_mode)
     x = np.zeros((len(t), len(STATE_NAMES)))
     u_cmd = _command(t, rng, mode)
     u_act = _actuator_response(u_cmd, config.dt)
-    x[0] = _initial_state(rng, config, aggressive=mode == "aggressive")
+    x[0] = _initial_state(rng, config, mode=mode)
     for index in range(len(t) - 1):
         x[index + 1] = rk4_step(x[index], u_act[index], config.dt, config)
     measurement_noise = np.asarray(config.measurement_noise)
@@ -215,6 +267,7 @@ def write_dataset(output_dir: Path, config: Aircraft6DOFConfig, make_plot: bool 
     np.savez_compressed(output_dir / "validation.npz", **validation_data)
     metadata = {
         "description": "Nonlinear 6DOF aircraft benchmark data with smooth stall aerodynamics, position, quaternion attitude, body velocity/rates, pilot commands, and mocap-style position/attitude measurements.",
+        "dataset_mode": _mode_family(config.dataset_mode),
         "config": asdict(config),
         "state_names": list(STATE_NAMES),
         "input_names": list(INPUT_NAMES),
@@ -246,7 +299,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--duration", type=float, default=12.0)
     parser.add_argument("--dt", type=float, default=0.02)
     parser.add_argument("--seed", type=int, default=17)
-    parser.add_argument("--dataset-mode", choices=["mixed", "aggressive", "near_trim"], default="mixed")
+    parser.add_argument("--dataset-mode", choices=DATASET_MODES, default="aggressive")
     parser.add_argument("--no-plot", action="store_true")
     return parser.parse_args()
 

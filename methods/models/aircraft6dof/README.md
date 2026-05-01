@@ -23,10 +23,16 @@ Run the smoke simulation from the repository root:
 PYTHONPATH=methods python3 -m models.aircraft6dof.smoke
 ```
 
-Generate the default 6DOF dataset:
+Generate the default aggressive 6DOF dataset:
 
 ```bash
 ./results.py simulate-6dof
+```
+
+Generate the 3DOF-like 6DOF dataset family:
+
+```bash
+./results.py simulate-6dof --dataset-modes open_loop sine_sweep aggressive trim_grid
 ```
 
 Run the implemented 6DOF baseline methods on an existing dataset:
@@ -43,8 +49,14 @@ Run the full local 6DOF workflow:
 
 The full workflow generates data, runs the baseline comparison, exports
 GitHub Pages JSON, and refreshes LaTeX-ready tables and figures. The generated
-dataset is written to `methods/data/aircraft_6dof_mixed/` and is intentionally
-ignored by git.
+aggressive dataset is written to `methods/data/aircraft_6dof_aggressive/` by
+default and is intentionally ignored by git. The available 6DOF dataset modes
+are:
+
+- `open_loop`: small multi-sine pilot inputs around near-trim conditions.
+- `sine_sweep`: chirp-like elevator, throttle, aileron, and rudder excitation.
+- `aggressive`: large pulses and multisine inputs that drive stall onset, drag rise, pull-up, and recovery.
+- `trim_grid`: local small-deviation inputs around a grid of speed, angle-of-attack, and sideslip operating points.
 
 Current baseline methods:
 

@@ -45,7 +45,7 @@ class Aircraft6DOFConfig:
     train_trials: int = 32
     validation_trials: int = 8
     seed: int = 17
-    dataset_mode: str = "mixed"
+    dataset_mode: str = "aggressive"
     measurement_noise: tuple[float, ...] = (0.03, 0.03, 0.03, 0.015, 0.015, 0.015, 0.015, 0.01, 0.01, 0.01, 0.02, 0.02, 0.02)
     mocap_position_noise: float = 0.003
     mocap_attitude_noise: float = 0.002

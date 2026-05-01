@@ -120,14 +120,23 @@ The 6DOF nonlinear aerodynamic comparison uses the top-level CLI:
 ./results.py all-6dof
 ```
 
-This command generates `methods/data/aircraft_6dof_mixed/`, runs the current
+This command generates `methods/data/aircraft_6dof_aggressive/`, runs the current
 6DOF baselines, writes `methods/results/aircraft6dof_method_comparison.csv`,
 updates `methods/tables/aircraft6dof_method_comparison.tex`, creates the
 `methods/fig/aircraft6dof_*` figures, refreshes the GitHub Pages JSON, and
 copies LaTeX-ready assets into `latex/`. The generated dataset itself is ignored
 by git because it is large and reproducible. The dataset includes true and
 attached-flow nominal aerodynamic coefficients; `coeff_residual` is the hidden
-stall/nonlinear coefficient term.
+stall/nonlinear coefficient term. To generate the full 6DOF dataset family
+without running methods, use:
+
+```bash
+./results.py simulate-6dof --dataset-modes open_loop sine_sweep aggressive trim_grid
+```
+
+Those modes mirror the 3DOF benchmark families: near-trim open-loop maneuvers,
+sine-sweep excitation, aggressive nonlinear stall/recovery maneuvers, and a
+local trim-grid dataset.
 
 Expected outputs:
 

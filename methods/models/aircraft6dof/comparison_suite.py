@@ -31,7 +31,7 @@ from .model import (
 
 
 METHODS_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_DATASET = METHODS_ROOT / "data" / "aircraft_6dof_mixed"
+DEFAULT_DATASET = METHODS_ROOT / "data" / "aircraft_6dof_aggressive"
 DEFAULT_RESULTS = METHODS_ROOT / "results"
 DEFAULT_FIG = METHODS_ROOT / "fig"
 DEFAULT_TABLES = METHODS_ROOT / "tables"
@@ -764,7 +764,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
             int(sum(weight.size for weight in local_residual_weights) + centers.size),
             pred,
             validation,
-            "6DOF counterpart to local frequency/model stitching; trained from the mixed trim and maneuver set.",
+            "6DOF counterpart to local frequency/model stitching; trained from the selected 6DOF dataset.",
         )
     )
 
@@ -1165,7 +1165,7 @@ def result_to_row(result: Result6DOF) -> dict[str, object]:
         "state_source": result.state_source,
         "input_channel": "u_cmd",
         "evaluation_mode": "open_loop",
-        "training_scenario": "aircraft_6dof_mixed",
+        "training_scenario": "aircraft_6dof_aggressive",
         "validation_score": result.validation_score,
         "train_elapsed_s": result.train_elapsed_s,
         "train_cpu_s": result.train_cpu_s,
@@ -1388,7 +1388,7 @@ def plot_score_heatmaps(rows: list[dict[str, object]], fig_dir: Path) -> None:
         ax.set_yticks(np.arange(len(labels)))
         ax.set_yticklabels(labels, fontsize=8.0)
         ax.set_xticks([0, 1])
-        ax.set_xticklabels(["Mean score", "Nonlinear 6DOF stall"], rotation=28, ha="right", fontsize=8.0)
+        ax.set_xticklabels(["Mean score", "Aggressive 6DOF dataset"], rotation=28, ha="right", fontsize=8.0)
         ax.set_ylabel("method")
         ax.set_title(f"Validation trajectory error: 6-DOF {source} benchmark", color=color)
         for row_index in range(scores.shape[0]):
