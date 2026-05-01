@@ -18,7 +18,7 @@ from common.dataset import DEFAULT_DATASET, load_split
 from common.metrics import rmse
 from common.paths import FIG_DIR, RESULTS_DIR
 from common.plotting import save_figure
-from simulation.longitudinal import MOCAP_RATE_HZ, derive_state_from_mocap
+from models.aircraft3dof.longitudinal import MOCAP_RATE_HZ, derive_state_from_mocap
 
 
 STATE_NAMES = ["V", "alpha", "gamma", "Q"]

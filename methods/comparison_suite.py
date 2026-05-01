@@ -25,7 +25,7 @@ from common.dataset import DEFAULT_DATASET, SplitData, load_dataset
 from common.metrics import aggregate_trajectory_score, finite_difference_derivative, rmse
 from common.paths import FIG_DIR, RESULTS_DIR, TABLE_DIR
 from common.plotting import save_figure
-from simulation.longitudinal import Aircraft, NominalAero, mocap_from_state
+from models.aircraft3dof.longitudinal import Aircraft, NominalAero, mocap_from_state
 
 
 STATE_NAMES = ["V", "alpha", "gamma", "Q"]
