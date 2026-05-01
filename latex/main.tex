@@ -832,13 +832,19 @@ training measurements only. After training, the parameter vector is frozen and
 validation uses the same pilot-command-only open-loop rollout protocol as the
 other dynamics-model rows.
 
-\paragraph{Frequency-Welch.}
+\paragraph{Frequency-Welch and Frequency-Stitching.}
 The frequency-domain baseline estimates averaged input/state spectra using
 Welch-style windows, discards low-coherence frequency bins, and fits a local
 continuous-time linear model from the weighted complex relation
 $j\omega X(\omega)=AX(\omega)+BU(\omega)$. This is not CIFER; it is a compact
 spectral baseline with some of the same diagnostic ingredients. Its result
-should not be interpreted as a judgement of CIFER performance.
+should not be interpreted as a judgement of CIFER performance. The
+Frequency-Stitching variant uses the same trim-grid training set as the local
+linear stitching baseline, fits one Welch linearization per trim-grid group,
+and blends the local derivative predictions with the same smooth scheduling
+weights. It is included to test whether the poor global frequency-domain row is
+mostly a single-LTI-model limitation or a deeper consequence of limited
+coherence, derivative noise, and non-frequency-optimized excitation.
 
 \paragraph{Subspace, Koopman, local linear, and stitched models.}
 The linear state-space baseline fits a one-step affine discrete model by least
@@ -1215,7 +1221,7 @@ This is a compact EDMD-style lifted predictor implemented in
 interpreted as a predictive surrogate, not as an aerodynamic-parameter
 estimator.
 
-\paragraph{Frequency-Welch.}
+\paragraph{Frequency-Welch and Frequency-Stitching.}
 The frequency-domain method fits the same continuous-time linear form as a
 local state-space model,
 \begin{equation}
@@ -1244,6 +1250,29 @@ $\widehat{\mathbf{c}}=\overline{\dot{\mathbf{x}}}
 The retained bins satisfy the coded frequency and coherence gates. This is
 \texttt{fit\_frequency\_linear\_model}; it is a Welch/ETFE-inspired baseline,
 not CIFER.
+The Frequency-Stitching row applies the same estimator locally on the trim-grid
+groups used for model stitching. For local model $i$,
+\[
+    \dot{\mathbf{x}}_i
+    =
+    \widehat{\mathbf{c}}_i
+    +
+    \widehat{A}_i\mathbf{x}
+    +
+    \widehat{B}_i\mathbf{u},
+\]
+and validation uses
+\[
+    \dot{\mathbf{x}}
+    =
+    \sum_i w_i(\mathbf{x},\mathbf{u})\dot{\mathbf{x}}_i,
+    \qquad
+    w_i =
+    \frac{\exp\{-\frac{1}{2}\|S^{-1}([\mathbf{x}^T,\mathbf{u}^T]^T-\boldsymbol{\mu}_i)\|^2/\ell^2\}}
+    {\sum_j \exp\{-\frac{1}{2}\|S^{-1}([\mathbf{x}^T,\mathbf{u}^T]^T-\boldsymbol{\mu}_j)\|^2/\ell^2\}}.
+\]
+This row therefore represents a local frequency-domain approximation, not a
+new nonlinear frequency-response estimator.
 
 \paragraph{SINDy and stepwise symbolic regression.}
 Both sparse-regression methods use the same library
@@ -1476,9 +1505,10 @@ Linear, stitched, and subspace models &
 Koopman-EDMD &
 \eqref{eq:code_koopman_edmd} &
 \texttt{fit\_koopman\_edmd}, \texttt{run\_koopman\_edmd}. \\
-Frequency-Welch &
+Frequency-Welch and Frequency-Stitching &
 \eqref{eq:code_frequency} &
-\texttt{fit\_frequency\_linear\_model}, \texttt{run\_frequency\_linear}. \\
+\texttt{fit\_frequency\_linear\_model}, \texttt{run\_frequency\_linear},
+\texttt{run\_frequency\_stitching}. \\
 SINDy and symbolic stepwise &
 \eqref{eq:code_sindy_library} &
 \texttt{sindy\_library}, \texttt{fit\_sindy}, \texttt{fit\_symbolic\_stepwise}. \\

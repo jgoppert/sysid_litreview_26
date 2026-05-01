@@ -39,7 +39,7 @@ def default_stitch_train_dataset(dataset: Path) -> Path:
     candidate = dataset.parent / "longitudinal_3dof_nonlinear_trim_grid"
     if not candidate.exists():
         raise FileNotFoundError(
-            f"Model-Stitching requires the trim-grid training dataset at {candidate}. "
+            f"Stitched local-model methods require the trim-grid training dataset at {candidate}. "
             "Generate it with './results.py simulate --dataset-modes trim_grid'."
         )
     return candidate
@@ -1856,6 +1856,127 @@ def run_frequency_linear(
     return result
 
 
+def run_frequency_stitching(
+    train_x: np.ndarray,
+    train_u: np.ndarray,
+    dxdt: np.ndarray,
+    train: SplitData,
+    validation: SplitData,
+    args: argparse.Namespace,
+) -> MethodResult:
+    start = time.perf_counter()
+    global_x = train_x.reshape(-1, 4)
+    global_u = train_u.reshape(-1, 2)
+    global_dxdt = dxdt.reshape(-1, 4)
+    trial_operating = np.column_stack((train.trim_state.reshape(train.n_trials, -1), train.trim_controls.reshape(train.n_trials, -1)))
+    if np.max(np.std(trial_operating, axis=0)) < 1e-9:
+        trial_operating = np.column_stack((train_x[:, 0, :], train_u[:, 0, :]))
+    n_models = max(1, min(int(args.stitch_models), train.n_trials))
+    labels, _ = kmeans_labels(trial_operating, n_models, args.seed)
+    global_intercept, global_coeff, global_bins = fit_frequency_linear_model(
+        train_x,
+        train_u,
+        dxdt,
+        train.dt,
+        args.frequency_max_hz,
+        args.frequency_ridge,
+        args.frequency_nperseg,
+        args.frequency_min_coherence,
+    )
+    intercepts = []
+    coeffs = []
+    centers = []
+    local_losses = []
+    bin_counts = []
+    min_trials = 2
+    for model_idx in range(n_models):
+        trial_ids = np.flatnonzero(labels == model_idx)
+        if len(trial_ids) >= min_trials:
+            x_local = train_x[trial_ids]
+            u_local = train_u[trial_ids]
+            dxdt_local = dxdt[trial_ids]
+            intercept, coeff, bins = fit_frequency_linear_model(
+                x_local,
+                u_local,
+                dxdt_local,
+                train.dt,
+                args.frequency_max_hz,
+                args.frequency_ridge,
+                args.frequency_nperseg,
+                args.frequency_min_coherence,
+            )
+            x_ref = np.mean(train.trim_state[trial_ids], axis=0)
+            u_ref = np.mean(train.trim_controls[trial_ids], axis=0)
+            x_flat = x_local.reshape(-1, 4)
+            u_flat = u_local.reshape(-1, 2)
+            dx_flat = dxdt_local.reshape(-1, 4)
+        else:
+            intercept = global_intercept.copy()
+            coeff = global_coeff.copy()
+            bins = global_bins
+            x_ref = np.mean(train.trim_state, axis=0)
+            u_ref = np.mean(train.trim_controls, axis=0)
+            x_flat = global_x
+            u_flat = global_u
+            dx_flat = global_dxdt
+        z_flat = np.column_stack((x_flat, u_flat))
+        local_losses.append(float(np.mean((intercept + z_flat @ coeff - dx_flat) ** 2)))
+        intercepts.append(intercept)
+        coeffs.append(coeff)
+        centers.append(np.concatenate((x_ref, u_ref)))
+        bin_counts.append(int(bins))
+    intercepts_arr = np.asarray(intercepts)
+    coeffs_arr = np.asarray(coeffs)
+    centers_arr = np.asarray(centers)
+    schedule_all = np.column_stack((global_x, global_u))
+    schedule_scale = schedule_all.std(axis=0)
+    schedule_scale[schedule_scale < 1e-9] = 1.0
+    if args.stitch_length_scale > 0.0:
+        length_scale = float(args.stitch_length_scale)
+    elif len(centers_arr) > 1:
+        center_z = (centers_arr - schedule_all.mean(axis=0)) / schedule_scale
+        dist = np.sqrt(np.sum((center_z[:, None, :] - center_z[None, :, :]) ** 2, axis=2))
+        median_center_distance = float(np.median(dist[dist > 0.0])) if np.any(dist > 0.0) else 1.0
+        length_scale = 0.35 * median_center_distance
+    else:
+        length_scale = 1.0
+    length_scale = max(length_scale, 1e-3)
+    elapsed = time.perf_counter() - start
+
+    def rhs(x: np.ndarray, u: np.ndarray) -> np.ndarray:
+        schedule = np.concatenate((x, u))
+        delta = (centers_arr - schedule) / schedule_scale
+        weights = np.exp(-0.5 * np.sum(delta**2, axis=1) / (length_scale**2))
+        weight_sum = np.sum(weights)
+        if not np.isfinite(weight_sum) or weight_sum <= 1e-12:
+            weights = np.zeros(len(centers_arr))
+            weights[int(np.argmin(np.sum(delta**2, axis=1)))] = 1.0
+        else:
+            weights = weights / weight_sum
+        z = np.concatenate((x, u))
+        local_rhs = intercepts_arr + np.einsum("j,kjl->kl", z, coeffs_arr)
+        return weights @ local_rhs
+
+    result = evaluate_method(
+        "Frequency-Stitching",
+        "Trim-grid collection of local Welch continuous-time linear models blended by scheduling weights.",
+        elapsed,
+        int(np.sum(bin_counts)),
+        int(intercepts_arr.size + coeffs_arr.size + centers_arr.size + schedule_scale.size + 1),
+        validation,
+        lambda _trial: rhs,
+        None,
+        (
+            f"Fits {n_models} local Welch/ETFE-inspired continuous-time models on trim-grid groups; "
+            f"rollout blends local derivatives with RBF weights in state-input space, length_scale={length_scale:.3g}. "
+            "This tests local frequency-domain stitching, not CIFER."
+        ),
+    )
+    result.backend = "NumPy local Welch/CSD"
+    result.train_loss_final = float(np.mean(local_losses))
+    return result
+
+
 def run_ude(xu: np.ndarray, dxdt: np.ndarray, validation: SplitData, args: argparse.Namespace, device: torch.device) -> tuple[MethodResult, list[tuple[int, float]]]:
     aircraft = Aircraft()
     theta = nominal_theta()
@@ -2398,7 +2519,7 @@ def main() -> int:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
     include_methods = set(args.include_methods or ["all"])
-    stitch_requested = "all" in include_methods or "Model-Stitching" in include_methods
+    stitch_requested = "all" in include_methods or bool({"Model-Stitching", "Frequency-Stitching"} & include_methods)
     train_dataset = args.train_dataset or args.dataset
     raw_train, _unused_train_validation = load_dataset(train_dataset)
     _unused_validation_train, raw_validation = load_dataset(args.dataset)
@@ -2491,6 +2612,28 @@ def main() -> int:
             results.append(run_logged("Subspace-Hankel", lambda: run_subspace_hankel(x_smooth, train.u_act, validation, local_args)))
         if wants("Frequency-Welch"):
             results.append(run_logged("Frequency-Welch", lambda: run_frequency_linear(x_smooth, train.u_act, dxdt, validation, local_args)))
+        if wants("Frequency-Stitching"):
+            if stitch_train is None:
+                raise RuntimeError("Frequency-Stitching requested without a loaded trim-grid training dataset")
+            stitch_x_smooth, stitch_dxdt = smooth_trials(
+                stitch_train.y_meas,
+                stitch_train.dt,
+                local_args.smooth_window,
+                local_args.polyorder,
+            )
+            results.append(
+                run_logged(
+                    "Frequency-Stitching",
+                    lambda: run_frequency_stitching(
+                        stitch_x_smooth,
+                        stitch_train.u_act,
+                        stitch_dxdt,
+                        stitch_train,
+                        validation,
+                        local_args,
+                    ),
+                )
+            )
         if wants("EquationError-LS"):
             results.append(run_logged("EquationError-LS", lambda: run_equation_error(xu, deriv, validation)))
         if wants("EKF-ParamID"):

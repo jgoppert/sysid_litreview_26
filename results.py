@@ -62,6 +62,7 @@ METHOD_WORKERS = (
     "Koopman-EDMD",
     "Subspace-Hankel",
     "Frequency-Welch",
+    "Frequency-Stitching",
     "EquationError-LS",
     "EKF-ParamID",
     "Fisher-UQ",
@@ -93,6 +94,7 @@ METHOD_TRAINING_MODES = {
     "Model-Stitching": "trim_grid",
     "Subspace-Hankel": "trim_grid",
     "Frequency-Welch": "trim_grid",
+    "Frequency-Stitching": "trim_grid",
     "Koopman-EDMD": "aggressive",
     "EquationError-LS": "aggressive",
     "EKF-ParamID": "aggressive",
@@ -433,6 +435,7 @@ def tradeoff_label(name: str, source: str) -> str:
         "OEM-MocapOutput": "OEM-mocap",
         "OEM-HiddenController": "OEM-hidden",
         "Frequency-Welch": "Freq-Welch",
+        "Frequency-Stitching": "Freq-Stitch",
         "Variational-Mocap": "Variational",
         "Subspace-Hankel": "Subspace",
         "Koopman-EDMD": "EDMD",
@@ -709,7 +712,10 @@ def plot_dataset_score_panels() -> None:
         ordered = sorted(rows, key=lambda row: float(row["validation_score"]))
         methods = [clean_method_name(row["method"], "direct") for row in ordered]
         scores = [float(row["validation_score"]) for row in ordered]
-        colors = ["#e45756" if method in {"Frequency-LS", "Frequency-CIFER", "Frequency-Welch"} else "#4c78a8" for method in methods]
+        colors = [
+            "#e45756" if method in {"Frequency-LS", "Frequency-CIFER", "Frequency-Welch", "Frequency-Stitching"} else "#4c78a8"
+            for method in methods
+        ]
         ax.bar(range(len(methods)), scores, color=colors)
         ax.set_yscale("log")
         ax.set_ylabel("mean state NRMSE")
