@@ -1,12 +1,14 @@
-\documentclass[conf]{new-aiaa}
+\documentclass[11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[margin=1in]{geometry}
 \usepackage{tikz}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.18}
-%\documentclass[journal]{new-aiaa} for journal papers
 \usepackage[utf8]{inputenc}
 \usepackage{booktabs}
 \usepackage{graphicx}
 \usepackage{amsmath}
+\usepackage{amssymb}
 \usepackage[version=4]{mhchem}
 \usepackage{siunitx}
 \usepackage{longtable,tabularx}
@@ -15,6 +17,10 @@
 \usepackage{svg}
 \usepackage{float}
 \usepackage{placeins}
+\usepackage{ifthen}
+\usepackage{natbib}
+\usepackage{url}
+\usepackage{hyperref}
 \svgsetup{inkscapepath=fig/}
 \svgpath{{fig/}}  % directory containing figures
 \hypersetup{hidelinks}
@@ -22,27 +28,38 @@
 \newboolean{commentsOn}
 \setboolean{commentsOn}{true} % or false
 
-\title{The Paradigm Shift in Aircraft System Identification Approaches:\\
-A Review of Classical and Modern Data-Driven Methods}
-
-\author{Kylie S. Sommer-Kohrt\footnote{Graduate Student, School Of Aeronautics and Astronautics, ksommerk@purdue.edu.} and Divyanshi Bansal\footnote{Graduate Student, School Of Aeronautics and Astronautics, bansa171@purdue.edu}}
-\affil{Purdue University, West Lafayette, Indiana, 47907}
-\author{Sabine Brunswicker\footnote{Professor, Polytechnic Institute, sbrunswi@purdue.edu.}}
-\affil{Purdue University, West Lafayette, Indiana, 47907}
-\author{James Goppert\footnote{Research Assistant Professor and Managing Director of Purdue UAS Research and Test Facility, School of Aeronautics and Astronautics, jgoppert@purdue.edu.}}
-\affil{Purdue University, West Lafayette, Indiana, 47907}
-
 \begin{document}
 
-\maketitle
+\begin{center}
+{\LARGE\bfseries Aircraft System Identification Benchmark Repository Reference}\\[0.75em]
+{\large Classical, Grey-Box, Surrogate, and Learning-Based Methods for 3-DOF and 6-DOF Aircraft Data}\\[0.75em]
+{\normalsize Generated reference document for the \texttt{system\_identification} repository}\\[0.5em]
+{\normalsize \today}
+\end{center}
+\vspace{1em}
 
 \begin{abstract}
-This paper presents a comprehensive review of aircraft system identification (SysID) methodologies spanning classical parametric methods and modern non-parametric, data-driven approaches. The practical motivation is the annual Purdue UAS Research and Test Facility (PURT) Pylon Racing Competition and associated indoor fixed-wing testbed \citep{sribunma2026indoor}, where small off-the-shelf fixed-wing aircraft require controller-ready models from limited experimental data. In this setting, motion capture may be the only reliable ground-truth measurement source; pitot-static data, onboard inertial measurements, and direct aerodynamic state measurements are not assumed. A comparative analysis is performed using a nonlinear longitudinal aircraft dynamics model with nominal-plus-unmodeled aerodynamic terms. The benchmark evaluates selected SysID techniques under both idealized state measurements and a motion-capture setting in which inertial position and pitch attitude are observed at 100 Hz while airspeed, angle of attack, flight-path angle, and pitch rate are latent or numerically reconstructed. Additional observation-rate studies at 10 Hz and 2 Hz illustrate how practical observability and derivative quality degrade as sampling bandwidth is reduced. The study highlights the strengths and limitations of each method, offering insight into their suitability for contemporary flight-dynamics modeling, control synthesis, autonomous aircraft applications, and counter-UAS test and evaluation.
+This document is the technical reference for the \texttt{system\_identification}
+repository. It defines the benchmark motivation, aircraft models, generated
+datasets, measurement assumptions, hidden-control cases, implemented
+identification methods, code-to-equation traceability, validation metrics, and
+current result summaries. The repository focuses on aircraft system
+identification for small fixed-wing vehicles when motion capture may be the
+only trusted measurement source. The current benchmark suite includes a
+nonlinear 3-DOF longitudinal model with nominal-plus-unmodeled aerodynamic
+terms, direct-state and motion-capture-derived observation modes, hidden
+SAFE-like command reshaping, multiple maneuver families, and a developing
+6-DOF model/data interface. The purpose of this reference is reproducibility:
+it should be possible to trace each equation, dataset field, result table, and
+figure back to repository code and regenerated artifacts.
 \end{abstract}
+
+\tableofcontents
+\clearpage
 
 \section*{Nomenclature}
 
-\begin{longtable*}{@{}l @{\quad=\quad} l@{}}
+\begin{longtable}{@{}l @{\quad=\quad} l@{}}
 $N$ & number of discrete samples \\
 $n_x, n_u, n_y$ & dimensions of state, input, and output vectors \\
 $i$ & discrete-time index ($i = 1, \ldots, N$) \\[3pt]
@@ -63,331 +80,105 @@ $L, D, M$ & lift, drag, and pitching moment \\
 $m, J_y$ & mass and pitch moment of inertia \\
 $\rho, S$ & air density and reference area \\
 $g$ & gravitational acceleration \\
-\end{longtable*}
-
-\section{Introduction:} 
+\end{longtable}
 
 
-System identification is a well-established field that originated in the 1950s. It has remained an enduring subject of research due to its widespread interdisciplinary significance. Fields such as economics, biology, chemistry, physics, and engineering utilize system identification extensively as a data-driven method to create models. Particularly, the field of control theory relies heavily on system identification for model-based approaches such as model predictive control (MPC), $H_{\infty}$ control, and linear quadratic regulators. This reliance has led to major research developments in these fields closely mirroring one another, with advancements in one often enabling advancements in the other. Therefore, in this review, system identification methods will be categorized and discussed alongside relevant control-theoretic developments of each era, reflecting the interwoven nature of research progress in system identification and control theory. 
+\section{Repository Scope and Orientation}
 
-As in control design, the appropriate system-identification method depends on
-the intended use of the resulting model. If stability margins and frequency
-response are the primary goals, frequency-domain methods are attractive because
-they produce transfer functions whose gain, phase, and robustness properties can
-be evaluated directly using Bode and Nyquist tools. If the goal is to recover
-meaningful aerodynamic or structural parameters, fixed-form time-domain methods
-such as equation-error, output-error, prediction-error, and filter-error
-estimators are often preferred because their parameters map directly to assumed
-force, moment, or state-space structures. When the goal is to capture nonlinear
-or off-nominal behavior that cannot be represented accurately by a fixed model
-structure, data-driven time-domain methods become attractive because they can
-learn part or all of the functional form from data. Methods such as neural
-networks, physics-informed neural networks (PINNs), and Sparse Identification
-of Nonlinear Dynamics (SINDy) trade some of the guarantees and interpretability
-of fixed-form models for flexibility in representing missing or modified
-dynamics.
+This reference documents the benchmark implemented in the \texttt{system\_identification} repository. It is not a general literature survey and it is not formatted as a journal submission. The purpose is to make the repository auditable: dataset definitions, model equations, method assumptions, generated figures, and result tables should all trace back to code that can be rerun.
 
-In the remainder of this section we will discuss the development of system identification categorized by modeling role. Frequency-domain methods identify spectral input-output structure and connect naturally to frequency-based control. Fixed-form time-domain methods estimate interpretable parameters within a prescribed state-space or aerodynamic model. Surrogate methods replace an expensive or unknown map, such as an aerodynamic coefficient table, CFD solver, or full input-output dynamics, with a cheaper learned approximation. Local-model and model-stitching methods approximate a broad nonlinear envelope by fitting simpler models in separate operating regions and then switching or blending among them. Finally, hybrid grey-box methods combine these viewpoints by retaining trusted physics while learning residual or closure terms from data.
+The current repository has three main products:
+\begin{enumerate}
+    \item a reproducible 3-DOF longitudinal aircraft benchmark with direct-state and motion-capture-style observation channels;
+    \item a developing 6-DOF aircraft dataset interface used to stabilize future coupled-dynamics benchmarks;
+    \item a static benchmark website data export and method-plugin interface for future contributed methods.
+\end{enumerate}
 
-The central argument of this review is that modern aircraft system
-identification is not replacing classical parametric methods with unconstrained
-black-box learning. Instead, the field is moving toward structured flexibility:
-models retain trusted kinematics, rigid-body balance laws, uncertainty
-quantification, and interpretable parameters where possible, while learning
-only the closures, residuals, or hidden input transformations that are not
-captured by the nominal model.
+The primary motivation is small fixed-wing system identification in indoor test environments such as the PURT pylon-racing and fixed-wing UAS testbed setting described by \citet{sribunma2026indoor}. In that setting, the trusted measurement source may be external motion capture rather than onboard air-data or inertial sensors. The 3-DOF benchmark therefore reports both idealized direct-state results and motion-capture-derived results, with additional mocap-output estimators for methods that fit position and attitude directly instead of differentiating them into aerodynamic states.
 
-Finally, we consider a case study motivated by the annual PURT Pylon Racing Competition at Purdue and the indoor fixed-wing UAS verification and validation testbed described by \citet{sribunma2026indoor}. In this environment, small off-the-shelf fixed-wing aircraft fly repeated laps and must be modeled rapidly from limited motion-capture data before being used with modern model-based controllers such as MPC. Unlike traditional flight-test aircraft, these platforms may not carry calibrated pitot-static systems, high-quality onboard IMUs, or air-data vanes. The empirical comparison is therefore centered on methods that can operate when the only trusted ground-truth signal is external position and attitude. The methods considered include the classical aerospace system-identification workflow represented by SIDPAC-style tools, frequency-domain spectral identification, SINDy, PINN-style grey-box learning, Universal Differential Equation (UDE) residual modeling, and neural coefficient surrogates. In this paper, ``SIDPAC-style'' does not mean only OEM. It refers to the broader fixed-structure aircraft identification workflow: equation-error fits for initialization and model-structure screening, output-error maximum-likelihood estimation for deterministic dynamics, filter-error or innovation methods for process-noise settings, and Fisher-information uncertainty diagnostics \citep{KleinMorelli2006,Morelli2002SIDPAC}. The implemented frequency-domain baseline uses Welch/ETFE-inspired spectral estimates, coherence screening, and weighted complex least-squares fitting. These ingredients are related to the workflow used in comprehensive tools such as CIFER \citep{Tischler1995SystemIM}, but the implementation here is not CIFER and its performance should not be interpreted as CIFER performance. Variational system identification extends the prediction-error family to process-noise and measurement-noise settings by estimating a smoothing distribution over latent states as well as model parameters \citep{dutra_variational_2025}. SINDy uses a physically motivated candidate library and sparsity constraints to discover compact nonlinear terms. Neural networks are treated as a surrogate modeling technology whose role depends on what map they replace: the full dynamics, an aerodynamic coefficient closure, a CFD-derived flow map, a residual correction, or an unobserved input-transformation map. PINN-style approaches introduce differential-equation residuals into the loss, but for the present aircraft problem the residual should enforce only the tractable flight-dynamics structure rather than an incomplete aerodynamic model. UDEs provide a closely related but more direct formulation in which known rigid-body dynamics are retained and neural correction terms represent unmodeled aerodynamic forces, moments, or hidden control effects. The benchmark is intentionally run under multiple observation assumptions: an ideal state-output case using simulated noisy $V,\alpha,\gamma,q$ for algorithm diagnosis, a motion-capture-derived state case, and a motion-capture-output case in which $V,\alpha,\gamma,q$ remain latent and the measured outputs are position and pitch attitude. This distinction is important because the benchmark is intended to test behavior under both structural model error and realistic measurement limitations. The same measurement-limited identification problem also arises in counter-UAS testing, where external tracking may be available but cooperative onboard air-data and inertial measurements may not be.
+\section{Repository Method Inventory}
 
-The contributions of the revised manuscript are therefore fourfold. First, it
-organizes aircraft system-identification methods by modeling role rather than
-only by chronology. Second, it defines a reproducible 3-DoF longitudinal
-benchmark with known nonlinear aerodynamic residuals, direct-state and
-motion-capture-style measurement channels, and SAFE-off/SAFE-on hidden-input
-cases. Third, it implements a shared comparison suite spanning fixed-structure
-time-domain methods, spectral methods, sparse symbolic methods, neural
-surrogates, PINN-style closures, UDE residuals, hidden-input learners, and
-latent-state mocap-output estimators. Fourth, it reports validation accuracy,
-runtime, and diagnostic figures so that method recommendations can be tied to
-the measurement and model-mismatch regime rather than to a single aggregate
-ranking.
+This section lists only the method families currently represented in repository code or generated benchmark tables. The implementations are centered in \texttt{methods/comparison\_suite.py}, with the emerging public plugin interface under \texttt{methods/plugins/}. Each method is evaluated by training on its assigned dataset and then performing validation rollouts using the validation initial condition and pilot-command input history. Validation measurements are used for scoring, not for feedback during the rollout, unless a method is explicitly categorized as a measurement-assimilating estimator.
 
-\subsection{Frequency-Domain Methods: Spectral Structure (1958-1995)}
-Frequency-domain system-identification methods grew naturally from classical
-frequency-based control. Nyquist's stability criterion \citep{nyquist1932regeneration}
-and Bode's gain-phase design framework \citep{bode1940relations} made the
-frequency response a central object for control analysis long before modern
-digital identification was practical. Early flight-control practice often used
-sine-dwell or swept-sine tests to construct empirical Bode and Nyquist plots,
-then adjusted gains to achieve acceptable stability margins. Later advances in
-spectral estimation, fast Fourier transforms, and state-space realization
-allowed frequency-domain data to be used for formal nonparametric and
-parametric identification. In aircraft and rotorcraft practice, this family of
-methods remains important because it connects directly to bandwidth, phase
-delay, coherence, actuator limits, and control-law validation.
+\subsection{Baselines and Fixed-Structure Aircraft Identification}
 
-\subsubsection{Frequency-based Non-parametric Methods}
-The Blackman--Tukey method \citep{blackman1958measurement} was an important
-early nonparametric spectral estimator because it estimated spectra indirectly
-from windowed autocorrelation functions, reducing the computational burden of
-working with long time records. The fast Fourier transform
-\citep{cooley1965algorithm} then made direct spectral estimation practical.
-Welch's method \citep{welch1967use} improved robustness by dividing a record
-into overlapping, windowed segments, computing periodograms for each segment,
-and averaging the resulting spectra. For input-output identification, analogous
-auto- and cross-spectral estimates provide empirical transfer-function
-estimates and coherence diagnostics \citep{ljung1985asymptotic}. The coherence
-is especially important in flight testing: low coherence indicates that a
-frequency-response point may be dominated by noise, nonlinearities, feedback
-correlation, or insufficient excitation.
+\paragraph{Nominal model.}
+The nominal row evaluates the coded 3-DOF aircraft model without the hidden nonlinear aerodynamic residuals. It is a no-fit baseline and appears in the result figures as the reference performance level.
 
+\paragraph{EquationError-LS.}
+The equation-error least-squares row fits aerodynamic coefficients from reconstructed state derivatives. It is fast and interpretable, but it is sensitive to measurement noise because the dependent variables require numerical differentiation.
 
+\paragraph{OEM-SS.}
+The output-error single-shooting row estimates fixed aerodynamic parameters by optimizing trajectory error through the longitudinal model. The implementation uses CasADi/IPOPT and is the main deterministic fixed-structure aircraft identification baseline for direct-state data.
 
-\subsection{Frequency-based Parametric Models}
+\paragraph{OEM-MocapOutput.}
+The mocap-output OEM row treats $V,\alpha,\gamma,Q$ as latent states and fits measured position and pitch attitude directly. This is the most relevant deterministic baseline for the motion-capture-only setting because it avoids differentiating position and attitude to construct aerodynamic states.
 
-Frequency-domain aircraft identification is valuable when the goal is a compact
-linear model for handling-quality, stability-margin, or flight-control analysis.
-After a nonparametric frequency-response estimate has been obtained, a
-parametric model can be fitted by minimizing complex residuals between measured
-and modeled transfer functions. Iterative least-squares approaches such as the
-Sanathanan--Koerner method, later developments by Pintelon and Schoukens, and
-state-space frequency-domain methods such as those of McKelvey provide ways to
-estimate rational transfer functions or state-space models from frequency-domain
-data while accounting for noise and weighting across frequency. In aerospace
-practice, dedicated excitation and coherence diagnostics are as important as
-the fitting algorithm. Multisines, chirps, 3-2-1-1 maneuvers, and sine sweeps
-are used to separate input channels and excite the relevant bandwidth, while
-coherence is used to judge whether an estimated frequency-response point is
-trustworthy. CIFER-style workflows \citep{Tischler1995SystemIM} are the
-best-known aircraft and rotorcraft example of this philosophy: they combine
-careful excitation design, spectral estimation, coherence screening, transfer
-function fitting, and control-oriented validation. The implementation used in
-the benchmark later in this paper is deliberately more modest. It uses
-Welch/ETFE-inspired averaged spectra and a coherence-weighted continuous-time
-linear fit, so it should be interpreted as a compact spectral baseline rather
-than as a replacement for CIFER.
+\paragraph{Variational-Mocap.}
+The variational/multiple-shooting mocap row adds process-residual flexibility while estimating latent states from mocap outputs. It is included as a practical bridge between fixed-structure output error and process-noise or smoothing formulations.
 
+\paragraph{EKF-ParamID and Fisher-UQ.}
+The EKF parameter-identification row estimates parameters from training data and then validates the learned model in open-loop rollout. The Fisher-information row provides local uncertainty and parameter-correlation diagnostics for the fitted fixed-structure model.
 
-\subsection{ Time Domain Parametric Methods: Enforced Prespecified Structure (1960-1992)}
-This section concentrates on system identification paradigms developed since the 1960s. Where pertinent, foundational concepts and intellectual predecessors from earlier periods are introduced to establish the necessary historical and theoretical context. The development of time-domain system identification surged after the paradigm shift caused by the introduction of state-space methods and innovation sequences in \cite{kalman1960new}. Kalman expanded optimal linear estimator frameworks that had previously been used on stationary stochastic processes in the frequency \cite{wiener1964extrapolation} and discrete time domain \cite{kolmogorov1941interpolation} to time-varying processes expressed in the discrete and continuous time domain.  The introduction of state space methods allowed for the control and modeling of Multi-Input Multi-Output (MIMO) systems, provided an explicit model structure for process and measurement noise, and provided a universal time-based model to represent system dynamics with. All of these developments allowed for more complex systems to be modeled and controlled, increasing the need for improved methods of system identification. The introduction of the Kalman filter also laid the theoretical groundwork for later system identification methodologies through the introduction of an innovation filter. 
+\subsection{Linear, Local, Lifted, and Frequency-Domain Predictors}
 
-\subsubsection{Equation/Output/Prediction/Filter Error Methods}
-The expansion of dynamic systems and most importantly the introduction of the innovation filter gave rise to the development of prediction error methods in 1965 \cite{aastrom1965numerical}. This system identification methodology uses the innovation filter introduced in \cite{kalman1960new} as a form of prediction error so maximum likelihood estimator principles  can be applied to find the asymptotically efficient solution using the statistical framework introduced by \cite{fisher1922mathematical}. 
-This was accomplished by proving that the parameters that maximize the likelihood of producing the current output given the previous inputs and outputs are equivalent to those found by minimizing the sum of least squares error when the unmodeled disturbance terms can be simplified to Gaussian white independent identically distributed noise. In effect this means that all of the correlated portions of the noise can be accounted for using the identified parameters. 
+\paragraph{Linear-SS.}
+The linear state-space row fits a discrete affine state-space predictor. It is a strong local predictive baseline, especially near trim or when mocap-derived state reconstruction dominates the error budget, but it should not be interpreted as recovering nonlinear aerodynamic structure.
 
-This proof unified the existing equation error system identification method with more complex methods. Equation-error estimation in modern aircraft SysID traces back to ordinary least squares, whose mathematical roots include Legendre's early nineteenth-century work on orbital parameter estimation \cite{legendre1805new} and later time-series regression work such as Yule's autoregressive modeling \cite{yule1924}. In the aircraft setting, equation error solves for parameters by minimizing residuals in algebraic or differential equations built from measured states, inputs, and state derivatives. The primary shortcoming of this method is that it is unable to model or account for measurement noise because the measurement is used to establish both the ground truth and the predicted truth inherently correlating the dependent variable and the regressor making the least squares approach no longer valid in this case. When the equation error method is used on a system with measurement noise it discovers biased parameter estimates. This problem is amplified when position and attitude measurements are differentiated to obtain velocity, angle of attack, flight-path angle, and pitch rate. This problem is solved by the prediction error method which accounts for both measurement and process noise as long as they meet the aforementioned noise conditions. A result of this is the output error method which identifies parameters for models with only measurement noise and no process noise. In aerospace, SIDPAC is closely associated with time-domain aircraft parameter estimation and output-error workflows \citep{Morelli2002SIDPAC}, while CIFER is more closely associated with frequency-domain rotorcraft and aircraft identification \citep{Tischler1995SystemIM}. The final major system identification method within the prediction error method framework is the filter error method. This method accounts for both process and measurement noise and uses the Kalman filter as the innovation filter for a state space system. FEM minimizes the error between the actual measured output and the one-step-ahead predicted output from a Kalman filter or similar state estimator. It explicitly estimates the system parameters alongside the noise covariance matrices, process noise and measurement noise. More recently, variational system identification has been proposed as an alternative formulation of the same maximum-likelihood problem, replacing the filter recursion with an optimization over a smoothing distribution for the latent state trajectory \citep{dutra_variational_2025}. Additional important work rigorously defining what system identification methods qualify as prediction error methods and proving the asymptotic efficiency and consistency of the method mathematically for the new more general framework was continued by Lennart Ljung in the 1970s \cite{1101840}. 
+\paragraph{Model-Stitching.}
+The model-stitching row fits local linear models on trim-grid data and blends them using scheduling weights. It tests whether multiple local models improve over one global linear model across wider initial-condition and maneuver variation.
 
-\subsubsection{Refined Instrumental Variables}
-The next system identification method requires a step backwards to the equation error method. Prior to the discovery of the prediction error method another statistical approach was used to reduce the bias caused by measurement noise when solving for the system parameters using the ordinary least squares method. This approach is called the instrumental variables method. It was first proposed by economist Philip Wright as applied to a static economics problem in 1928 \cite{wright1928tariff} and a time series by statistician Olav Reiersol in 1945\cite{reiersol1945confluence}.
-The core idea is to replace the noisy regressors with auxiliary variables, called "instruments", which are strongly correlated with the regressors but statistically independent of the measurement noise affecting the output. In the context of system identification this was typically done using past inputs of the system. The major downside to this method is that while it eliminates most bias it does not utilize all information available in the data to create the most statistically efficient estimator. Prediction error methods approach maximum asymptotic efficiency as defined by the Cramer Rao lower bound while traditional instrumental variable methods were substantially less efficient in the statistical sense but far more computationally efficient than prediction error methods which required iterative nonlinear optimization to solve in most cases. This level of computational burden was unsolvable for most computers of the time period meaning many people still used instrumental variables simply out of necessity since it had a closed form linear solution.
+\paragraph{Subspace-Hankel.}
+The subspace row fits a compact linear predictor using Hankel/subspace-style structure. It represents the repository's current state-space realization baseline.
 
-In order to lessen the statistical efficiency gap between instrumental variables method and prediction error methods a new approach called refined instrumental variables was proposed in 1970 \cite{young1970instrumental}. This method traded off some of the abundant computational efficiency for statistical efficiency. Rather than using past input measurements as "instruments" a new iterative recursive method is used to find "instruments" that better reduces error variation and that account for an iterative estimated noise model as well making the parameter estimate more efficient. Many of these improvements were inspired by the improvements made by \cite{aastrom1965numerical} but reformatted using auxiliary variables to make implementing them less burdensome. It is still not efficient as prediction error methods but it is very close in terms of statistical efficiency it is also much less of a computational burden since it does not require nonlinear optimization. 
+\paragraph{Koopman-EDMD.}
+The Koopman-EDMD row fits a lifted linear predictor using a fixed nonlinear feature library. It is included as a predictive surrogate rather than as an aerodynamic-parameter estimator.
 
-\subsubsection{Subspace Methods}
-The next major discovery relevant to system identification following the discovery of prediction error methods was made by Ho \& Kalman in 1966, it is typically called the Ho-Kalman Realization \cite{HOKALMAN+1966+545+548}. This realization used findings from \cite{kalman1960new} especially those regarding controllability and observability to discover the minimum state space needed to represent a system by using singular value decomposition of a Hankel matrix of impulse responses. The number of nonzero singular values discovered is equal to the rank of the infinite Hankel matrix and represent the minimum state dimension of the system. While this discovery did not directly result in a new method of system identification it was foundational in the eventual development of subspace system identification method 26 years later.
+\paragraph{Frequency-Welch.}
+The frequency-domain row uses Welch/ETFE-inspired spectral estimates, coherence screening, and a weighted continuous-time linear fit. It is not CIFER and should be interpreted only as the repository's compact spectral baseline.
 
-The final classical system identification method introduced is the subspace method. This method came along substantially later than the other system identification methods \cite{aastrom1965numerical,young1970instrumental} and the Ho-Kalman realization \cite{HOKALMAN+1966+545+548} mostly because most of the research interest in the intermediate decade was on theoretical work primarily with regards to prediction error methods due to their optimality and ability to handle stochastic systems. During this period foundational theoretical findings were made regarding terminology, problem formulation, and broad classifications of system identification methods \cite{ASTROM1971123}.  
+\paragraph{Frequency-Stitching.}
+The frequency-stitching row applies the same spectral fitting idea locally on trim-grid groups and blends the resulting local continuous-time models. It tests whether the poor global frequency-domain performance is primarily a single-LTI-model limitation.
 
-The Ho-Kalman realization is a framework that was originally developed for a deterministic setting and mathematics using large Hankel matrices were very burdensome so they became much more practical to implement in the 1990s when the publicly available computing resources vastly improved. There are two primary subspace methods that were developed in this time frame: Multi-variable Output-Error State sPace (MOESP) \cite{verhaegen1992subspace} and Numerical algorithms for Subspace State Space System IDentification (N4SID) \cite{VANOVERSCHEE199475}. These methods differ in how they calculate the state sequence and the exact geometric methods used to separate the identifiable dynamics from the noise. Despite these differences they produce equivalent results as they take separate valid approaches to solving the same problem. This approach has a simple unique closed form solution and was created to provide a simple optimal method for performing system identification on a MIMO state space system that is faster than prediction error methods in this case and more robust to local minima.
+\subsection{Sparse, Symbolic, Kernel, and Neural Closure Methods}
 
-\subsection{Time Domain Data-Driven Methods: Learned Structure (1990s-Present)}
-One issue with classical approaches is that they require the systems being modeled to fit a clear, known, typically linear form. There are many systems that behave nonlinearly and unexpectedly that also need to be identified. In recent years more emphasis has been placed on data-driven methods to allow for the discovery of models with unexpected and complex forms that could not be well modeled using classical methods. Originally these data-driven approaches were non-parametric black boxes making robust safety guarantees impossible. However, recently particular emphasis has been placed on the field of symbolic regression due to its ability to produce parsimonious physical models that are easy to interpret the physical meaning of. The timeline of development for both of these data-driven approaches will be discussed to show the development towards more interpretable data-driven approaches as these approaches bridge the gap between the interpretability of classical methods and the modeling flexibility of black-box data driven approaches. 
+\paragraph{SINDy.}
+The SINDy row uses a structured coefficient-library formulation so that known low-order aircraft terms can be protected while sparse nonlinear residual terms are selected from a candidate library.
 
-\subsubsection{Neural Networks}
-Neural networks have been around since as early as the 1940s but did not gain widespread popularity until a paper written in 1986 \cite{rumelhart1986learning} popularized the knowledge that backpropagation could be used to train multilayer perceptrons to discover underling data trends. While this was the paper that popularized the idea of this training method an earlier paper made the initial discovery in 1974 \cite{werbos1974beyond}. The first application of neural networks to identify the model for an unknown nonlinear dynamic system occurred in 1990 \cite{kumpati1990identification}  where this model was additionally used to apply adaptive control onto the system successfully. This crucial discovery led to a surge of interest into black box modeling approaches because it allowed for the discovery of complex and nonlinear models with no requirement of prior knowledge of the system. While this was beneficial for many applications where discovering a physical model is infeasible it ran into issues in being applied to real-world controls scenarios due to the difficulty in proving robust safety since the weight and bias structure of neural networks have no physical meaning making debugging during training difficult and the options for designing a controller for the fully trained model limited. Efforts to use neural networks as a more interpretable system identification method gave rise to Physics Informed Neural Networks (PINNs). PINNs introduce physics based constraints onto neural networks through the introduction of physics-based loss term. This helps neural networks handle noise better and allows for the discovery of parameters in addition to the discovery of a nonparametric model providing more flexibility for controller design. PINNs were introduced conceptually in 1998 \cite{lagaris1998artificial} and formally named and popularized in a publication made in 2017 \cite{raissi2017physics}. Overall this concept bridges the gap between classical system identification concepts and modern nonparametric approaches by enforcing physical constraints through the loss function allowing for a wider usage of neural network based system identification techniques.
+\paragraph{Symbolic-Stepwise.}
+The symbolic-stepwise row uses the same candidate-library idea with forward stepwise selection. It is a lightweight symbolic baseline rather than a full genetic-programming symbolic-regression implementation.
 
-\subsubsection{Genetic Symbolic Regression}
-While the genetic algorithm has existed as a global optimization framework since 1975 \cite{holand1975adaptation} the idea to use this global optimization framework as a method of equation discovery was a much more recent research development made in 1990 \cite{koza1990genetic} by Holland's student John Koza. The genetic algorithm is a global optimization heuristic developed based off of the principle of natural selection. It starts by randomly  generating a population, giving that population fitness score, and only allowing organisms with high enough fitness scores to reproduce. Reproduction involves crossover which involves mixing the the genetic material of two parent organisms and mutation which involves making a small change to the the resulting organism to promote diversity.Then the under-performing members of the population are replaced by the new organisms and the previous steps are repeated until the algorithm reaches the global optimum or reaches an iteration limit. The work \cite{koza1990genetic} applied this algorithm to equation discovery by making the organisms equation trees where the leaves are coefficients, the branches are mathematical operators, and these operators connect at the root to form the equation. Then the genetic algorithm was applied to these equation trees until they converged to a globally optimal solution. One issue with applying the genetic algorithm directly to the equation discovery problem as defined was that reproducing using entire equation trees is that often correctly discovered operations would get lost, equation trees would grow unnecessarily large and complex, and the process of reproducing was often redundant and not computationally efficient. These issues made using the genetic algorithm not a particularly popular approach until automatically defined functions were introduced \cite{koza1994genetic} addressing the issues with the original approach, improving scalability considerably, and popularizing the approach among the research community. Automatically defined functions replace clusters of branches and represent more complex mathematical operations. By grouping mathematical operations it allows for correctly identified portions of the equation to be passed on more readily and more efficient reproduction which lead to more parsimonious solution discovery. While the advancements made in \cite{koza1994genetic} made this symbolic regression method usable there is still room for improvement. This approach still tends to result in unnecessarily bloated solutions, struggles to handle coefficient leaves in an efficient manner, and premature convergence. Despite the many limitations this work is foundational to the field of symbolic regression and system identification because it was the first method capable of automated complex model discovery. The previously mentioned drawbacks of the genetic symbolic regression have improved due to ongoing research into optimizing genetic symbolic regression.
+\paragraph{GP-CoeffClosure.}
+The GP/RBF coefficient-closure row learns a smooth residual aerodynamic coefficient map with kernel features. It represents the repository's current kernel surrogate closure method.
 
+\paragraph{NN-CoeffSurrogate.}
+The neural coefficient surrogate row learns aerodynamic coefficient residuals from labels available in the synthetic benchmark. Because real flight tests do not provide those coefficient labels directly, this row is an upper-bound diagnostic for what a supervised closure could achieve.
 
-\subsubsection{Sparse Identification of Nonlinear Dynamics}
- The seminal work discussing this approach is Discovering governing equations from data:Sparse identification of nonlinear dynamical systems by \cite{brunton2016discovering}. This approach is highly efficient and interpretable since it prioritizes parsimony in its search for coefficients; however, there are still notable drawbacks to this approach. The most obvious is the reliance upon expert knowledge to generate the dictionary of possible terms. Another issue is the need for dense timeseries data. Work by \cite{champion2019data} has shown that even a short duration of densely collected data is better able to model unknown dynamics than a longer duration of sparse data. This approach also struggles when the measurements taken do not represent all states relevant to representing the system dynamics. This is because the dictionary of possible terms will not include the terms needed to represent this "hidden" state. Additionally, this approach does not scale well for high dimensional problems due because the library quickly becomes intractably large. Despite the seemingly large list of cons there have been papers offering solutions to each of the problems discussed making this a promising symbolic regression approach.
-\subsubsection{Hybrid Neural Differential Equation Methods}
-Recently, a growing body of work has sought to augment known equations of motion 
-with a learned neural residual term. This approach expresses system dynamics as
-\begin{equation}
-    \dot{x}(t) = \underbrace{f_{\text{phys}}(x, u;\,\theta_p)}_{\text{known physics}} 
-    \;+\; \underbrace{\mathcal{U}_{\phi}(x, u)}_{\text{learned residual}},
-    \label{eq:ude}
-\end{equation}
-where $f_{\text{phys}}$ encodes the known aerodynamic equations of motion and 
-$\mathcal{U}_{\phi}$ is a neural network trained to absorb unmodeled effects such 
-as icing, gusts, or actuator nonlinearities. While Rackauckas~\textit{et al.}~\cite{rackauckas2020universal} 
-formalized this structure as Universal Differential Equations (UDEs) within the 
-broader scientific machine learning community, its adoption in aerospace system 
-identification remains nascent.
+\paragraph{PINN-CoeffClosure and PINN-HiddenElevator.}
+The PINN-style rows use flight-dynamics-level residuals, not full CFD or Navier--Stokes constraints. The coefficient-closure row learns aerodynamic closures, while the hidden-elevator row tests whether a neural model can infer a hidden command correction in SAFE-like cases.
 
-Current applications of this philosophy, often termed Physics-Informed Neural ODEs, 
-demonstrate significant potential. \citet{liPINODE2023} applied this form to a 
-fixed-wing aircraft under icing and actuator faults, splitting universally applicable 
-kinematics from a neural network correction on the kinetics, similar to the 
-decomposition expressed in Eq.~\eqref{eq:ude}. \citet{jarry2025nodefdm} extended 
-this philosophy to trajectory-level modelling, embedding Neural ODEs within 
-analytical kinematic relations (NODE-FDM) to outperform physics-only baselines 
-such as BADA on altitude, speed, and mass dynamics.
+\paragraph{UDE-Residual and UDE-HiddenControl.}
+The UDE rows retain the known longitudinal dynamics and learn residual terms. The residual row targets missing aerodynamics, while the hidden-control row targets unknown input reshaping from a proprietary SAFE-like controller.
 
-Despite these gains, widespread implementation continues to be constrained by 
-flight-certification requirements for fully interpretable models and the scarcity 
-of high-fidelity, labeled off-nominal flight data needed to train the residual 
-terms $\mathcal{U}_{\phi}$ reliably. 
-\subsubsection{Physics Informed Neural Networks}
-Recent aerospace-focused work by Michek, Mehta, and Huebsch~\citep{michek2026flight} provides a useful reference point for interpreting PINNs in flight-dynamics modeling. They distinguish between Determinant PINNs, which use a trajectory network and a parameter-estimation layer with a user-specified functional form; Non-Determinant PINNs, which replace the parameter layer with a neural network that learns how aerodynamic coefficients vary with explanatory variables; and Modified Non-Determinant PINNs, which remove the trajectory network when sufficient measured or derived state-rate information is available and train the coefficient network through the equations-of-motion residual. Their simulated demonstrations include both a 2D projectile case with varying drag and a nonlinear F-16 6-DOF case in which aerodynamic coefficients are learned from many flight intervals with randomized sinusoidal and doublet control inputs.
+\section{Dataset and Result Artifacts}
 
-This framing is important for the present 3-DOF longitudinal benchmark. The goal is not to use a PINN as a high-fidelity CFD surrogate or to enforce the nominal aerodynamic model as if it were exact. Instead, the PINN-style model considered here is closer to the Non-Determinant or Modified Non-Determinant coefficient-learning viewpoint: the rigid-body longitudinal equations provide the physics residual, while the aerodynamic closure terms $C_L$, $C_D$, and $C_M$ are allowed to contain learned nonlinear corrections. The simplified 3-DOF setting therefore acts as a controlled intermediate case between classical parameter estimation and the more general multi-flight 6-DOF coefficient-learning problem studied by Michek et al.
-\subsection{Bayesian Approaches and Uncertainty Quantification}
-Classical output-error methods provide point estimates of aerodynamic parameters with
-uncertainty quantified via the Cram\'{e}r--Rao lower bound (CRLB)\citep{hale2016aerodynamic} obtained from the inverse of the Fisher information matrix. However, the CRLB is inherently a frequentist and asymptotic result, relying on sufficient excitation, correct model structure, and local Gaussianity of the likelihood. These limitations motivate Bayesian approaches, where Maximum A Posteriori (MAP) estimation paired with the Laplace approximation provides a local Gaussian approximation of the posterior distribution around the the most probable parameter estimates(MAP). While computationally efficient, the Laplace approximation implicitly assumes near-Gaussian posteriors and can degrade under strong nonlinearities, limited excitation, or sparse flight-test data, where posterior distributions may become skewed or multimodal.
+The 3-DOF benchmark datasets are generated under \texttt{methods/data/longitudinal\_3dof\_nonlinear\_*}. The generated splits contain direct state measurements, mocap position/attitude measurements, mocap-derived aerodynamic states, pilot commands, actuator-realized commands, hidden SAFE corrections, coefficient residual labels, and residual-dynamics labels. The default validation metric in the result tables is the mean range-normalized state RMSE, denoted $J_{\mathrm{val}}$ in this document.
 
-When posterior distributions deviate from Gaussianity, Markov chain Monte Carlo (MCMC) methods enable recovery of the full posterior. Early work by Ninness and Henriksen \citep{ninness2010bayesian} demonstrated Metropolis--Hastings (MH) sampling for nonlinear dynamic-system identification, highlighting its advantage in small-sample regimes where asymptotic approximations fail. Hendriks et al.\ \citep{hendriks2021practical} subsequently show that Hamiltonian Monte Carlo substantially reduces chain autocorrelation in higher-dimensional models, making MCMC more tractable for complex identification problems. In aerospace applications, MCMC has seen growing adoption for aerodynamic coefficient
-estimation from flight and ballistic-range data \citep{oz2025nonlinear,
-kassem2025bayesian, natureSR2026, callisto2024jsrocket}. Despite these advances, the computational cost of MCMC remains prohibitive for large flight envelopes and long trajectory datasets.
+The 6-DOF dataset interface is generated by
+\begin{verbatim}
+./results.py simulate-6dof
+\end{verbatim}
+and currently writes \texttt{methods/data/aircraft\_6dof\_mixed/}. This dataset stabilizes the state, input, position, quaternion-attitude, and mocap-style measurement interface for future 6-DOF benchmark work. It uses the current smoke dynamics and should not yet be interpreted as the final nonlinear 6-DOF aerodynamic benchmark.
 
-
-This computational bottleneck has motivated the adoption of variational inference (VI), which reformulates posterior estimation as an optimisation problem. Dutra \citep{dutra_variational_2025} applies VI directly to aircraft system identification by jointly estimating aerodynamic parameters and a smoothing posterior over the latent state path through ELBO maximisation. The method is positioned as a practical alternative to the filter-error method for systems with both process noise and measurement noise, such as aircraft operating in turbulence, because it avoids Riccati-equation propagation and unstable predictor issues associated with some FEM implementations. Dutra demonstrates the approach on real aircraft flight-test data and reports convergence from zero initial parameter guesses across the tested examples, while emphasizing that smoother output alone is not a sufficient validation metric because smoothing corrections can hide model error. In the present benchmark, variational system identification therefore fits between OEM and modern learned-residual methods: it is a probabilistic grey-box estimator for latent-state and parameter uncertainty, but it does not by itself discover missing aerodynamic terms unless those terms are included in the model parameterization. Extending this to nonparametric dynamics, variational GP-SSMs \citep{frigola2014variational} enable scalable inference over unknown transition functions, while amortised formulations \citep{doerr2018probabilistic} further reduce cost via recognition networks. Park et al.\ \citep{park2021bayesian} apply this to aircraft-specific settings with a multi-regime GP-SSM that clusters flight regimes via a mutual-information regulariser. VI-based methods, however, depend critically on the expressiveness of the variational family and can underestimate uncertainty in multimodal or highly nonlinear regimes such as stall or actuator saturation.
-
-An alternative perspective treats aerodynamic coefficients as unknown functions of the flight condition rather than fixed parameters. Gaussian process (GP) regression provides a principled Bayesian framework for such nonparametric modelling, offering calibrated uncertainty that adapts to data density \citep{rasmussen2006gaussian}. In aircraft applications, GP-based methods have been used to learn stability and control derivatives directly from flight data \citep{hemakumara2013learning}, including extensions to noisy input settings via NIGP \citep{karino2020nigp}. 
-Despite their strong uncertainty quantification capabilities, these nonparametric approaches generally lack direct physical interpretability in terms of classical stability and control derivatives. This remains a critical limitation for certification and control design, where interpretable, low-dimensional parametric models are still required.  Another line of work adopts a grey-box Bayesian perspective, such as Mazhar et al.\citep{mazhar2024bayesian} demonstrated
-improved fit for aircraft lateral-directional dynamics via a Bayesian-refined Box--Jenkins structure.  In summary, Bayesian approaches are undergoing a significant evolution, moving away from restrictive asymptotic assumptions toward flexible, data-driven architectures and are being actively researched by the community.
-\subsection{Surrogate Modeling and Aerodynamic Closure Learning}
-Surrogate modeling is best understood as a modeling role rather than a single algorithm. A surrogate replaces an expensive, unavailable, or inconvenient map with a cheaper approximation. In aircraft applications, the replaced map may be a CFD solver, a wind-tunnel aerodynamic database, a lookup table of force and moment coefficients, a reduced-order flow model, or the complete input-output dynamics. Classical surrogate methods include response surfaces, radial basis functions, splines, Kriging, and Gaussian-process emulators. The design and analysis of computer experiments formalized Kriging-style emulation for expensive deterministic simulations \citep{sacks1989design}, while GP regression provides the probabilistic foundation for uncertainty-aware surrogates \citep{rasmussen2006gaussian}. In aerospace design, surrogate-based analysis and optimization became important because high-fidelity aerodynamic and multidisciplinary simulations are too expensive to evaluate repeatedly across a large design space \citep{queipo2005surrogate,forrester2008engineering}.
-
-Multi-fidelity surrogate modeling extends this idea by combining data sources with different cost and accuracy. A low-fidelity panel method, reduced CFD grid, or empirical aerodynamic model may be inexpensive but biased, while wind-tunnel, high-fidelity CFD, or flight-test data are more accurate but sparse. Bayesian multi-fidelity models use correlations between fidelity levels to improve predictions from limited high-fidelity data \citep{kennedy2000predicting}. This perspective is especially relevant for aircraft system identification because flight-test data rarely cover the full envelope, while simulation and wind-tunnel databases can provide additional information about the aerodynamic closure. Recent aerodynamic applications combine simulation and wind-tunnel data to correct Reynolds-number effects and pressure distributions using multi-fidelity learning \citep{yang_reynolds_2023}.
-
-Reduced-order modeling is another surrogate route for high-dimensional flow physics. Proper orthogonal decomposition (POD) represents flow fields in a low-dimensional modal basis \citep{berkooz1993pod}, while dynamic mode decomposition (DMD) extracts coherent spatio-temporal modes from simulation or experimental data \citep{schmid2010dmd}. Koopman-operator methods provide a related lifted-linear view of nonlinear dynamics, originating from Koopman's Hilbert-space formulation \citep{koopman1931hamiltonian} and leading to data-driven approximations such as extended dynamic mode decomposition (EDMD) \citep{williams2015data}. These approaches are not usually flight-test parameter-estimation methods by themselves, but they can produce compact flow, surrogate, or lifted state-space models that feed a lower-dimensional flight-dynamics model.
-
-Neural networks fit naturally within this surrogate taxonomy. A feedforward neural network can approximate an aerodynamic coefficient map, a recurrent or neural state-space model can approximate input-output dynamics, and an autoencoder can learn a latent reduced-order representation. More recently, neural operators such as DeepONet and the Fourier Neural Operator learn mappings between function spaces, making them suitable candidates for CFD-level surrogates that map geometry, boundary conditions, and flight condition to flow fields or aerodynamic loads \citep{lu2021deeponet,li2021fno}. In this review, neural networks are therefore not treated as separate from surrogate models. Instead, they are one flexible surrogate class whose interpretability and usefulness depend on whether they replace the full aircraft dynamics, the aerodynamic closure, a residual correction, or a high-fidelity flow solver.
-
-Model stitching is a related surrogate strategy that trades a single global model for a collection of local models. The idea appears in local-expert and mixture-of-experts models \citep{jacobs1991adaptive}, multiple-model nonlinear modeling and control \citep{murray1997multiple}, and LPV identification \citep{toth2010lpv}. In aircraft applications, the scheduling variables may include airspeed, angle of attack, pitch rate, throttle, elevator, flight mode, or a hidden-controller indicator. A local linear or local aerodynamic-coefficient model can be accurate near trim, another near high-angle-of-attack stall onset, and another during recovery. The stitch may be a hard switch, a gain-scheduled interpolation, or a probabilistic mixture. This is attractive for small-UAS benchmarks because aggressive maneuvers deliberately move across regimes where one global linearization is inadequate. The drawbacks are equally important: regime boundaries must be excited by data, interpolation can create nonphysical force or moment behavior, and hard switching can introduce discontinuities unless the stitched model is constrained carefully.
-
-Classical nonlinear input-output identification also deserves explicit mention. NARX/NARMAX models, Volterra-series methods, and block-oriented Hammerstein-Wiener structures model nonlinear dynamics using lagged inputs and outputs rather than rigid-body state equations; see, for example, the NARMAX treatment of \citet{billings2013nonlinear}. These methods are powerful when the desired product is a predictive input-output model, especially for closed-loop control or signal processing. They are less directly aligned with the present aerodynamic benchmark because the paper asks whether each method can separate missing aerodynamic closure, state reconstruction error, and hidden command reshaping. The implemented Hankel/subspace and Koopman-EDMD rows partially represent this input-output and lifted-linear tradition, but a full NARMAX/block-oriented benchmark remains future work.
-\subsection{Model Flexibility vs.\ Interpretability}\label{sec:flex_int}
-Two properties govern the practical utility of any system identification method for aerospace applications: {model flexibility} and model interpretability. Model flexibility refers to the capacity of a model structure to represent a broad range of dynamic behaviors including nonlinear, coupled, or partially unknown phenomena without requiring to fully specify the functional form in advance. A highly flexible model can fit arbitrarily complex input–output relationships given sufficient data, but it does so by expanding the space of candidate representations, in other words by increasing the dimension of parameters in the model structure. On the other hand, model interpretability refers to the degree to which the identified parameters and model structure can be mapped to physically meaningful quantities. An interpretable model allows us to extract aerodynamic derivatives, validate physical plausibility, reason about failure modes, and construct stable controllers.
-These properties are mathematically best captured by the classical bias–variance trade-off. Increasing model complexity reduces bias by enlarging the representable function class, but simultaneously increases estimation variance and degrades generalization to unseen data.
-% As discussed by Pillonetto~\textit{et al.}~\cite{pillonetto_deep_2023}, the expected validation error for a parametric model can be approximated as
-% \begin{align}
-%     \mathbb{E}[V_{\text{valid}}] \approx \sigma^2 \left(1 + \frac{m}{N} \right),
-%     \label{eq:bias_variance}
-% \end{align}
-% where $m$ denotes the number of free parameters and $N$ the number of data samples. This relationship makes the trade-off precise, i.e.,  \\
-
-Consequently, classical identification methods adopt parsimonious, low-dimensional parameterizations and appeal to principles such as Occam's razor to select the simplest model consistent with the data~\cite{ljung1999system}. 
-In the context of aircraft system identification, this trade-off manifests clearly across the spectrum of available methods, illustrated qualitatively in Fig.~\ref{fig:interp_flex_bw}. At one end, classical approaches such as the Output-Error Method (OEM) use compact, physics-based parameterizations in which aerodynamic stability and control derivatives retain direct physical meaning, supporting analysis, certification, and model-based control design. The model structure is fixed a priori from the equations of motion, yielding high interpretability but limited flexibility.
-% The effects such as gust disturbances, actuator nonlinearities, or off-nominal aerodynamic behavior are not encoded in the assumed parameterization and therefore cannot be represented accurately and will instead manifest as biased parameter estimates or inflated residuals.
-
-Moving toward greater flexibility, Sparse Identification of Nonlinear Dynamics (SINDy)~\cite{brunton2016discovering} expands the candidate function space by constructing a user-defined library of basis terms and then applying sparsity promoting regularization to select a compact, active subset. This retains a degree of interpretability because the discovered terms are explicit symbolic functions of the state, while relaxing the requirement for a fully pre-specified model structure.
-
-Surrogate models occupy a parallel axis in this taxonomy because they are defined by the map they replace rather than by a specific estimation objective. A GP, neural network, or reduced-order model may be used as a surrogate for an aerodynamic coefficient table, a residual force model, a CFD solver, or the full aircraft dynamics. Interpretability therefore depends on the surrogate target. A neural network that outputs $C_L$, $C_D$, and $C_M$ is more physically inspectable than one that maps directly from inputs to future states, even if both are neural surrogate models.
-
-Physics-Informed Neural Networks (PINNs)~\cite{raissi2017physics} represent a hybrid use of surrogate modeling and physics regularization, but the meaning of the physics residual must be chosen carefully. For aircraft system identification at the flight-dynamics level, the rigid-body equations and kinematic identities are the reliable physics, while aerodynamic force and moment models are closures that may be incomplete. Penalizing a PINN for deviating from a nominal aerodynamic coefficient model can therefore hurt discovery of unmodeled effects. In this work, PINN-style methods are interpreted more narrowly as grey-box learners that enforce the longitudinal equations of motion while allowing the aerodynamic closures to be learned or regularized.
-
-At the most flexible extreme, Hybrid Neural Differential Equation methods embed neural network terms directly within the known differential equations of motion to represent unmodeled or partially known dynamics. Rather than learning a fully black-box input–output map, a UDE augments the physics with a learned correction term: $\dot{x}(t) = f_{\text{phys}}(x,u;\theta_p) + \mathcal{U}_\phi(x,u)$, where $\mathcal{U}_\phi$ accounts for residual dynamics not captured by $f_{\text{phys}}$. This is particularly natural for aircraft identification because the rigid-body structure can be retained while the neural term learns missing aerodynamic force and moment increments. The cost is reduced interpretability: $\theta_p$ and $f_{\text{phys}}$ remain physically meaningful, but the correction term $\mathcal{U}_\phi$ is not as directly interrogable as a closed-form aerodynamic model. Pure black-box neural networks extend this 
-further, maximizing representational flexibility at the expense of both interpretability 
-and the safety-critical certifiability required in aerospace applications.\\
-
-From this perspective, classical identification methods, surrogate models, and hybrid grey-box approaches are best understood not as competing paradigms but as adopting different strategies to manage the bias variance trade-off summarized in Fig.~\ref{fig:interp_flex_bw}. The methods selected for comparison in this work are OEM, SINDy, PINN-style grey-box learning, and UDE residual modeling because they span this spectrum and allow for a principled assessment of how this trade-off affects parameter recovery, residual modeling, generalization, and practical utility for aircraft dynamics identification.
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}
-\begin{axis}[
-    width=0.62\linewidth,
-    height=0.47\linewidth,
-    xmin=0, xmax=10.4,
-    ymin=0, ymax=10.4,
-    xlabel={Flexibility},
-    ylabel={Interpretability},
-    xtick={0,5,10},
-    xticklabels={Low,Moderate,High},
-    ytick={0,5,10},
-    yticklabels={Low,Moderate,High},
-    grid=both,
-    axis lines=left,
-    major grid style={dashed, gray!25},
-    minor tick num=0,
-    tick align=outside,
-    axis line style={black, thick},
-    xlabel style={font=\small},
-    ylabel style={font=\small},
-    tick label style={font=\small},
-    label style={font=\small},
-    enlargelimits=false,
-    clip=false
-]
-    % OEM: high prior knowledge (circle)
-    \addplot[
-        only marks,
-        mark=*,
-        mark size=3pt,
-        black,
-        thick
-    ] coordinates {(2.0,9.0)};
-    % SINDy: moderate prior knowledge (square)
-    \addplot[
-        only marks,
-        mark=square*,
-        mark size=2.8pt,
-        black
-    ] coordinates {(5.0,7.5)};
-    % PINNs: high prior knowledge (circle) — raised above UDEs
-    % Enforces full governing equations; identified params are physically meaningful
-    \addplot[
-        only marks,
-        mark=*,
-        mark size=3pt,
-        black,
-        thick
-    ] coordinates {(7.5,6.5)};
-    % UDE: moderate prior knowledge (square) — lowered below PINNs
-    % Learned correction term U_phi has no physical meaning
-    \addplot[
-        only marks,
-        mark=square*,
-        mark size=2.8pt,
-        black
-    ] coordinates {(8.8,5.2)};
-    % NN / black-box: no prior knowledge (triangle)
-    \addplot[
-        only marks,
-        mark=triangle*,
-        mark size=3.4pt,
-        black
-    ] coordinates {(9.5,1.5)};
-    % Labels
-    \node[anchor=south west, font=\small] at (axis cs:2.0,9.0)  {OEM};
-    \node[anchor=south west, font=\small] at (axis cs:5.0,7.5)  {SINDy};
-    \node[anchor=south west, font=\small] at (axis cs:7.55,6.5) {PINNs};
-    \node[anchor=north west, font=\small] at (axis cs:8.85,5.2) {UDEs};
-    \node[anchor=north east, font=\small, align=right] at (axis cs:9.45,1.45) {NN\\(black-box)};
-    % Legend
-    \node[
-        draw=black,
-        fill=white,
-        font=\scriptsize,
-        align=left,
-        anchor=north west
-    ] at (axis cs:0.55,3.35) {%
-    \begin{tabular}{@{}l l@{}}
-\tikz \draw[fill=black] (0,0) circle (1.6pt); & High prior knowledge required \\
-\tikz \draw[fill=black] (0,0) rectangle (3pt,3pt); & Moderate prior knowledge required \\
-\tikz \draw[fill=black] (0,0) -- (3.0pt,0) -- (1.5pt,2.6pt) -- cycle; & No prior knowledge required
-\end{tabular}
-    };
-\end{axis}
-\end{tikzpicture}
-\caption{Qualitative positioning of representative aircraft system identification approaches
-in terms of interpretability and flexibility. Marker shape indicates the approximate level
-of prior physical knowledge required by each method.}
-\label{fig:interp_flex_bw}
-\end{figure}
-\subsection{Existing  System Identification Surveys:}
-While there are several meta-reviews that have been created throughout the years but so far none have gone into detail tracking the development from classical parametric system identification methods to the modern development of interpretable parsimonious nonparametric methods. They typically only cover classical methods \cite{astrom_numerical_1965}, classical methods or modern nonparametric methods in isolation \cite{makke_interpretable_2024,dong2025recent,fu_research_2013} without analyzing the broader implications such development have on the field of system identification as a whole. Likewise, many aerospace-centric reviews \cite{bucharles_overview_2012,mehra_time-domain_2004} dismiss modern non-parametric methods as insufficiently robust for safety-critical use because neural networks are hard to interpret, overlooking newer system-identification techniques that yield parsimonious nonlinear models with minimal prior knowledge. These properties are particularly beneficial for aerospace applications due to the unpredictable and often nonlinear factors experienced by aircraft in flight such as wind, aeroelasticity, and icing effects. 
-% The Fig.~\ref{fig:taxonomy} organizes some of the SysID methods according to their reliance on prior knowledge versus their structural flexibility. Approaches near the grey region incorporate strong physical assumptions, whereas those in the black region function as true black-box models with no prior model information. }
-
-% \begin{figure}[hbt!]
-%     \centering
-%     \includesvg[width=0.6\linewidth]{taxonomy2} % your SVG file name (without .svg)
-%     \caption{Taxonomy of system identification methods}
-%     \label{fig:taxonomy}
-% \end{figure}
+Website-ready benchmark data are exported by
+\begin{verbatim}
+./results.py web-data
+\end{verbatim}
+into \texttt{site/public/data/}. The static site can be served locally with
+\begin{verbatim}
+./results.py serve-site
+\end{verbatim}
+The method-contribution workflow is intentionally two-phase: public pull requests add method code and pass plugin smoke checks, while full benchmark results are regenerated later in a trusted maintainer commit.
 
 \section{Problem Formulation: 3 DOF Aircraft Longitudinal Model}\label{sec:prob}
 The different system identification approaches would be investigated using a 3 DOF longitudinal aircraft motion, which means the aircraft is in a wings-level condition (\cite{StevensLewis2015}). In such a state, roll angle $\phi = 0$, and $\dot{\theta}=Q$. The side slip is assumed to be small, hence $\gamma = \theta - \alpha$.\\
@@ -1862,7 +1653,7 @@ the exact likelihood requires marginalizing over the latent state path $\mathbf{
 \]
 over both the model parameters and the smoothing distribution. In Dutra's aircraft formulation \citep{dutra_variational_2025}, the assumed density is chosen to preserve a Markov structure so that the objective remains sparse and tractable. This makes VI a natural candidate for the mocap-output problem considered here: the measured outputs are $p_x,p_z,\theta$, the flight states are latent, and turbulence or unmodeled disturbances can be represented as process noise rather than being forced into measurement residuals.
 
-The role of VI in this paper is therefore different from SINDy, PINNs, or UDEs. VI improves inference for a prescribed grey-box model in the presence of process and measurement noise; it does not automatically supply a new aerodynamic closure. If the nominal coefficient structure is incomplete, VI can produce better state smoothing and uncertainty estimates, but the missing aerodynamic physics must still be represented through additional parameters, basis functions, Gaussian-process terms, or neural residuals. A natural extension of the present benchmark is therefore a variational UDE or variational coefficient-closure model, where VI handles latent-state and process-noise uncertainty while the residual model handles structural aerodynamic error.
+The role of VI in this repository benchmark is therefore different from SINDy, PINNs, or UDEs. VI improves inference for a prescribed grey-box model in the presence of process and measurement noise; it does not automatically supply a new aerodynamic closure. If the nominal coefficient structure is incomplete, VI can produce better state smoothing and uncertainty estimates, but the missing aerodynamic physics must still be represented through additional parameters, basis functions, Gaussian-process terms, or neural residuals. A natural extension of the present benchmark is therefore a variational UDE or variational coefficient-closure model, where VI handles latent-state and process-noise uncertainty while the residual model handles structural aerodynamic error.
 
 \subsubsection{Multiple--Shooting Formulation}
 
@@ -2046,7 +1837,7 @@ aerodynamic terms.
 \subsection{Physics-Informed and Neural-Residual Methods}
 For the longitudinal benchmark considered here, a direct inverse PINN that penalizes deviations from the same fixed aerodynamic coefficient model used by OEM is not the most appropriate use of physics information. The purpose of the benchmark is to evaluate identification methods when unmodeled aerodynamic forces, moments, actuator effects, or disturbances are present. If the PINN physics residual forces the trajectory to satisfy an incomplete nominal force and moment model, the residual acts as a regularizer toward the wrong dynamics and can suppress the missing effects the method is supposed to discover.
 
-The useful distinction is between exact structure and aerodynamic closure assumptions. Kinematic identities and rigid-body balance laws should be enforced strongly or built into the parameterization. By contrast, aerodynamic force and moment functions should remain learnable because these are precisely the terms that may change outside the nominal model. A tractable PINN formulation for this paper therefore uses a neural trajectory $\widehat{\mathbf{x}}_\theta(t)$ and learned aerodynamic coefficient functions,
+The useful distinction is between exact structure and aerodynamic closure assumptions. Kinematic identities and rigid-body balance laws should be enforced strongly or built into the parameterization. By contrast, aerodynamic force and moment functions should remain learnable because these are precisely the terms that may change outside the nominal model. A tractable PINN formulation for this benchmark therefore uses a neural trajectory $\widehat{\mathbf{x}}_\theta(t)$ and learned aerodynamic coefficient functions,
 \[
 \widehat{C}_{D,\phi}=\mathcal{N}_{D,\phi}(\widehat{\alpha},\widehat{q},\delta_e,\widehat{V}),\quad
 \widehat{C}_{L,\phi}=\mathcal{N}_{L,\phi}(\widehat{\alpha},\widehat{q},\delta_e,\widehat{V}),\quad
@@ -2093,12 +1884,12 @@ C_M &= C_{M,\mathrm{nom}}(x,u;\theta_p)+\Delta C_{M,\phi}(x,u).
 \]
 This is especially plausible for the present scope because the known model is used where it is trusted, while the neural residual captures model-form error. The identified parameters $\theta_p$ remain interpretable, and the residual terms provide a direct diagnostic for where the nominal aerodynamic model is inadequate.
 
-This formulation is intentionally not a full aerodynamic PINN in the Navier-Stokes sense. Without geometry, flow-field states, boundary conditions, and a high-fidelity solver or data set, enforcing the Euler, RANS, or Navier-Stokes equations is not tractable in this paper. The PINN comparison is therefore limited to flight-dynamics-level grey-box learning, while high-fidelity CFD-constrained surrogate modeling is treated as future work.
+This formulation is intentionally not a full aerodynamic PINN in the Navier-Stokes sense. Without geometry, flow-field states, boundary conditions, and a high-fidelity solver or data set, enforcing the Euler, RANS, or Navier-Stokes equations is not tractable in this repository benchmark. The PINN comparison is therefore limited to flight-dynamics-level grey-box learning, while high-fidelity CFD-constrained surrogate modeling is treated as future work.
 
 
 
 
-\section{Conclusions}
+\section{Method Selection Guidance}
 The benchmark is designed to support method selection rather than identify a
 single universally best algorithm. When direct measurements of
 $V,\alpha,\gamma,Q$ are available and the primary mismatch is unknown
@@ -2166,17 +1957,10 @@ verify that simple models are not unfairly penalized, while aggressive
 initial-condition and maneuver variation reveal when global linearity is no
 longer adequate.
 
-\section{Future Work}
-Traditional neural networks, being fully black-box models, lack physical meaning and are therefore difficult to certify for safety-critical flight applications. Recent advances in sparse, kernel, lifted-linear, and physics-constrained learning can help overcome this limitation. Integrating interpretable nonlinear system identification frameworks, such as Sparse Identification of Nonlinear Dynamics (SINDy), symbolic regression, GP/Kriging coefficient closures, Koopman-EDMD, flight-dynamics-level PINNs, and UDE residual models with control design represents an important future research direction. These approaches can uncover latent dynamics and nonlinear dependencies that are not captured by classical parametric structures.
+\section{Repository Roadmap}
+The immediate roadmap is repository-driven rather than submission-driven. The first priority is to keep the 3-DOF benchmark reproducible: generated datasets, figures, tables, website artifacts, and this reference document should be regenerated from the same command-line entry points. The second priority is to mature the developing 6-DOF dataset interface into a full nonlinear benchmark with coupled lateral-directional and longitudinal dynamics. The third priority is to stabilize the method-plugin interface so external contributors can add methods without editing the core comparison harness.
 
-The benchmark still does not fully represent every mature nonlinear system-identification family. In particular, a dedicated NARX/NARMAX, Volterra, and Hammerstein-Wiener comparison would be useful for the input-output prediction problem, especially when only motion-capture outputs and pilot commands are trusted. Those methods are adjacent to the subspace and Koopman rows included here, but they require a separate lag/order/structure-selection study to be fair. The model-stitching row added here is also only a first local-model baseline: a fair LPV, mixture-of-experts, or multi-regime GP-SSM study would need explicit scheduling-variable selection, continuity constraints at regime boundaries, and uncertainty treatment for regime assignment.
-
-A separate high-fidelity path is possible when detailed geometry, flow-field data, and CFD solvers are available. In that setting, PINNs or neural operators could be used to build aerodynamic surrogate models constrained by the Euler, RANS, or Navier-Stokes equations together with boundary and far-field conditions. The surrogate could then provide force and moment closures for a 3-DoF or 6-DoF flight-dynamics model. This route is closer to CFD-based surrogate modeling than to classical flight-test system identification, so it is outside the scope of the present comparison but is an important direction for unsteady and strongly nonlinear aerodynamic regimes.
-
-% Furthermore, studying how uncertainty quantification from these methods propagates into control constraints may enable certifiable, learning-augmented control architectures.
-Another important extension is the development of uncertainty-aware system identification methods. Future work will investigate Bayesian formulations to characterize parameter uncertainty and its propagation through system dynamics. Such approaches can enable uncertainty-informed control and safety analysis, which are critical for deployment in safety-critical aerospace applications.
-
-% Another important extension is the evaluation of next-generation SysID techniques under off-nominal aerodynamic conditions such as icing, control-surface failures, or structural degradation. Classical linear techniques often struggle in such regimes, whereas hybrid symbolic ML models may adaptively infer changes in aerodynamic behavior. Developing standardized open-source datasets and benchmarking frameworks for these off-nominal identification scenarios would be a valuable contribution to the field.
+Future methods should be added only when the repository contains executable code, benchmark metadata, and validation results for the new row. Candidate additions include input-output nonlinear predictors, richer local/LPV model stitching, Bayesian uncertainty-aware variants of the existing grey-box methods, and high-fidelity aerodynamic surrogate closures. Until those implementations exist in the repository, this reference limits detailed method descriptions to the rows already represented by code and generated results.
 
 \appendix
 \section{Benchmark Result Tables}
@@ -2252,10 +2036,7 @@ measurements. Lower validation score is better.
 \input{generated/shared_uq_diagnostics_table}
 }{}
 
-\section*{Acknowledgments}
-The authors acknowledge the use of AI for assisting in the efficient summarization of research papers used in the literature review and for the purpose of improving grammatical clarity of existing writing. All outputs were verified by the authors to ensure accuracy.
-% An Acknowledgments section, if used, \textbf{immediately precedes} the References. Individuals other than the authors who contributed to the underlying research may be acknowledged in this section. The use of special facilities and other resources also may be acknowledged. Sponsorship information and funding data are included here. The preferred spelling of the word “acknowledgment” in American English is without the “e” after the “g.” Avoid expressions such as “One of us (S.B.A.) would like to thank. . . ” Instead, write “F. A. Author thanks. . . ”.  If AI is used in the writing process or figure construction as permitted, authors must include a brief description of AI use in the Acknowledgments section of the manuscript.
-
+\bibliographystyle{plainnat}
 \bibliography{ref}
 
 
