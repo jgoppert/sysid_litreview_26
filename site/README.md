@@ -5,15 +5,21 @@ This directory is a static GitHub Pages application for browsing benchmark resul
 Run locally from the repository root:
 
 ```bash
-python3 -m http.server 8000 --directory site
+./results.py serve-site
 ```
 
-Then open `http://localhost:8000`.
+Then open the printed local URL.
 
 Refresh the data bundle with:
 
 ```bash
 ./results.py web-data
+```
+
+Run a fast end-to-end setup check with:
+
+```bash
+./results.py check-setup
 ```
 
 The app reads JSON from `site/public/data/`. It does not run benchmark methods in the browser; benchmark execution remains Python-native and the site is only an interactive results viewer.

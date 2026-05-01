@@ -1,0 +1,54 @@
+# System Identification Benchmark
+
+This repository contains aircraft system-identification benchmark code, generated paper artifacts, and a static benchmark browser for GitHub Pages.
+
+## Quick Local Test
+
+Run the setup smoke check:
+
+```bash
+./results.py check-setup
+```
+
+This verifies:
+
+- benchmark export code imports and compiles,
+- method plugin metadata can be discovered,
+- plugin smoke checks pass,
+- website JSON is regenerated,
+- the 6DOF model skeleton runs a deterministic smoke simulation.
+
+Serve the benchmark website locally:
+
+```bash
+./results.py serve-site
+```
+
+Open the printed `http://127.0.0.1:<port>` URL. If port `8000` is already in use, the command chooses the next available port.
+
+## Two-Phase Method Contributions
+
+Method contributions are intentionally split from benchmark-result generation:
+
+1. A method PR adds plugin code and docs under `methods/plugins/<method_name>/`.
+2. A maintainer runs the full benchmark on trusted hardware and commits regenerated results separately.
+
+See [docs/CONTRIBUTING_METHODS.md](docs/CONTRIBUTING_METHODS.md).
+
+## Local GPU Benchmark
+
+For a full local run on an NVIDIA workstation:
+
+```bash
+./results.py suite \
+  --device cuda \
+  --jobs 30 \
+  --threads-per-worker 1 \
+  --max-gpu-workers 2 \
+  --input-channel u_cmd
+./results.py latex-assets
+./results.py web-data
+python3 latex/paper.py build
+```
+
+See [docs/SELF_HOSTED_GPU.md](docs/SELF_HOSTED_GPU.md) for the self-hosted runner setup.

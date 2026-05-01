@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import math
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -1524,6 +1526,76 @@ def web_data(args: argparse.Namespace) -> None:
     print(f"Exported {len(manifest['scenarios'])} scenarios at schema {manifest['schema_version']}")
 
 
+def _plugin_dirs() -> list[Path]:
+    plugin_root = METHODS / "plugins"
+    if not plugin_root.exists():
+        return []
+    return sorted(path.parent for path in plugin_root.glob("*/method.json"))
+
+
+def check_setup(_args: argparse.Namespace) -> None:
+    """Run fast local checks for the website/plugin benchmark setup."""
+
+    from methods.benchmark.registry import all_method_metadata
+
+    py_files = [
+        "methods/benchmark/export.py",
+        "methods/benchmark/method_api.py",
+        "methods/benchmark/registry.py",
+        "methods/benchmark/smoke_plugin.py",
+        "methods/models/aircraft6dof/model.py",
+        "methods/models/aircraft6dof/smoke.py",
+        "results.py",
+    ]
+    run([sys.executable, "-m", "py_compile", *py_files])
+    registered_methods = all_method_metadata(METHODS / "plugins")
+    if not registered_methods:
+        raise SystemExit("method registry is empty")
+    print(f"Registered {len(registered_methods)} methods")
+    for plugin_dir in _plugin_dirs():
+        run([sys.executable, "-m", "methods.benchmark.smoke_plugin", str(plugin_dir)])
+    web_data(argparse.Namespace(output=ROOT / "site" / "public" / "data"))
+    manifest_path = ROOT / "site" / "public" / "data" / "manifest.json"
+    method_results_path = ROOT / "site" / "public" / "data" / "method_results.json"
+    manifest = json.loads(manifest_path.read_text())
+    method_results = json.loads(method_results_path.read_text())
+    if not manifest.get("scenarios"):
+        raise SystemExit("site manifest has no scenarios")
+    if not method_results:
+        raise SystemExit("site method_results.json has no method rows")
+    run([sys.executable, "-m", "models.aircraft6dof.smoke"], cwd=METHODS)
+    print("Setup check passed.")
+    print(f"Site data: {len(manifest['scenarios'])} scenarios, {len(method_results)} method result rows")
+
+
+def _port_available(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def _choose_port(start: int) -> int:
+    port = int(start)
+    for candidate in range(port, port + 100):
+        if _port_available(candidate):
+            return candidate
+    raise SystemExit(f"could not find an available port from {port} to {port + 99}")
+
+
+def serve_site(args: argparse.Namespace) -> None:
+    """Serve the static benchmark site locally."""
+
+    web_data(argparse.Namespace(output=ROOT / "site" / "public" / "data"))
+    port = _choose_port(args.port)
+    print(f"Serving benchmark site at http://127.0.0.1:{port}")
+    print("Press Ctrl-C to stop.")
+    run([sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", str(ROOT / "site")])
+
+
 def all_results(args: argparse.Namespace) -> None:
     if not args.skip_simulate:
         simulate(args)
@@ -1607,6 +1679,13 @@ def parse_args() -> argparse.Namespace:
     p_web = sub.add_parser("web-data", help="export current method results into site/public/data JSON")
     p_web.add_argument("--output", type=Path, default=ROOT / "site" / "public" / "data")
     p_web.set_defaults(func=web_data)
+
+    p_check = sub.add_parser("check-setup", help="run fast checks for the plugin, website, and model setup")
+    p_check.set_defaults(func=check_setup)
+
+    p_serve = sub.add_parser("serve-site", help="serve the static benchmark website locally")
+    p_serve.add_argument("--port", type=int, default=8000)
+    p_serve.set_defaults(func=serve_site)
 
     p_build = sub.add_parser("build", help="build latex/main.pdf")
     p_build.set_defaults(func=build_pdf)
