@@ -125,6 +125,10 @@ FIGURE_EXPORTS = {
     "shared_train_time_accuracy_tradeoff.svg": "generated_shared_train_time_accuracy_tradeoff.svg",
     "observation_rate_state_reconstruction.svg": "generated_observation_rate_state_reconstruction.svg",
 }
+SIX_DOF_FIGURE_EXPORTS = {
+    "aircraft6dof_validation_score_comparison.svg": "generated_aircraft6dof_validation_score_comparison.svg",
+    "aircraft6dof_validation_trajectory_overlay.svg": "generated_aircraft6dof_validation_trajectory_overlay.svg",
+}
 ARCHIVED_FIGURES = [
     "shared_validation_score_comparison.svg",
     "shared_validation_trajectory_overlay.svg",
@@ -1060,6 +1064,10 @@ def copy_figures() -> None:
         source = METHOD_FIG / name
         if source.exists():
             shutil.copy2(source, LATEX_FIG / f"generated_{name}")
+    for source_name, target_name in SIX_DOF_FIGURE_EXPORTS.items():
+        source = METHOD_FIG / source_name
+        if source.exists():
+            shutil.copy2(source, LATEX_FIG / target_name)
 
 
 def latex_assets(_args: argparse.Namespace) -> None:
@@ -1070,6 +1078,9 @@ def latex_assets(_args: argparse.Namespace) -> None:
     write_experiment_method_tables()
     write_observation_rate_table()
     write_uq_table()
+    six_dof_table = METHODS / "tables" / "aircraft6dof_method_comparison.tex"
+    if six_dof_table.exists():
+        shutil.copy2(six_dof_table, LATEX_GENERATED / "aircraft6dof_method_comparison_table.tex")
     plot_train_time_accuracy()
     plot_validation_score_comparison()
     for mode in available_archived_modes():
@@ -1127,6 +1138,45 @@ def simulate_6dof(args: argparse.Namespace) -> None:
     if args.no_plot:
         command.append("--no-plot")
     run(command, cwd=METHODS)
+
+
+def suite_6dof(args: argparse.Namespace) -> None:
+    command = [
+        sys.executable,
+        "-m",
+        "models.aircraft6dof.comparison_suite",
+        "--dataset",
+        str(args.dataset),
+        "--state-source",
+        args.state_source,
+        "--ridge",
+        str(args.ridge),
+        "--results-dir",
+        str(METHOD_RESULTS),
+        "--fig-dir",
+        str(METHOD_FIG),
+        "--table-dir",
+        str(METHODS / "tables"),
+    ]
+    if args.no_plot:
+        command.append("--no-plot")
+    run(command, cwd=METHODS)
+
+
+def all_6dof(args: argparse.Namespace) -> None:
+    simulate_6dof(args)
+    suite_6dof(
+        argparse.Namespace(
+            dataset=args.output,
+            state_source=args.state_source,
+            ridge=args.ridge,
+            no_plot=args.no_plot,
+        )
+    )
+    latex_assets(args)
+    web_data(argparse.Namespace(output=ROOT / "site" / "public" / "data"))
+    if args.build:
+        build_pdf(args)
 
 
 def rates(_args: argparse.Namespace) -> None:
@@ -1569,6 +1619,7 @@ def check_setup(_args: argparse.Namespace) -> None:
         "methods/benchmark/registry.py",
         "methods/benchmark/smoke_plugin.py",
         "methods/models/aircraft6dof/model.py",
+        "methods/models/aircraft6dof/comparison_suite.py",
         "methods/models/aircraft6dof/smoke.py",
         "results.py",
     ]
@@ -1701,6 +1752,27 @@ def parse_args() -> argparse.Namespace:
     p_sim6.add_argument("--dataset-mode", choices=["mixed", "aggressive", "near_trim"], default="mixed")
     p_sim6.add_argument("--no-plot", action="store_true")
     p_sim6.set_defaults(func=simulate_6dof)
+
+    p_suite6 = sub.add_parser("suite-6dof", help="run baseline methods on the 6DOF train/validation dataset")
+    p_suite6.add_argument("--dataset", type=Path, default=METHODS / "data" / "aircraft_6dof_mixed")
+    p_suite6.add_argument("--state-source", choices=["direct", "mocap", "both"], default="both")
+    p_suite6.add_argument("--ridge", type=float, default=1e-5)
+    p_suite6.add_argument("--no-plot", action="store_true")
+    p_suite6.set_defaults(func=suite_6dof)
+
+    p_all6 = sub.add_parser("all-6dof", help="generate 6DOF data, run baseline methods, export LaTeX/site assets, and optionally build")
+    p_all6.add_argument("--output", type=Path, default=METHODS / "data" / "aircraft_6dof_mixed")
+    p_all6.add_argument("--train-trials", type=int, default=256)
+    p_all6.add_argument("--validation-trials", type=int, default=64)
+    p_all6.add_argument("--duration", type=float, default=20.0)
+    p_all6.add_argument("--dt", type=float, default=0.02)
+    p_all6.add_argument("--seed", type=int, default=17)
+    p_all6.add_argument("--dataset-mode", choices=["mixed", "aggressive", "near_trim"], default="mixed")
+    p_all6.add_argument("--state-source", choices=["direct", "mocap", "both"], default="both")
+    p_all6.add_argument("--ridge", type=float, default=1e-5)
+    p_all6.add_argument("--no-plot", action="store_true")
+    p_all6.add_argument("--build", action="store_true")
+    p_all6.set_defaults(func=all_6dof)
 
     p_rates = sub.add_parser("rates", help="run the observation-rate study")
     p_rates.set_defaults(func=rates)

@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .schema import METHOD_RESULT_FIELDS, MODEL_FAMILY_3DOF, SCHEMA_VERSION
+from .schema import METHOD_RESULT_FIELDS, MODEL_FAMILY_3DOF, MODEL_FAMILY_6DOF, SCHEMA_VERSION
 from .registry import all_method_metadata, metadata_to_dict
 
 
@@ -29,6 +29,12 @@ NUMERIC_FIELDS = {
     "rmse_alpha",
     "rmse_gamma",
     "rmse_Q",
+    "rmse_position_m",
+    "rmse_velocity_mps",
+    "rmse_quaternion",
+    "rmse_rates_rad_s",
+    "rmse_mocap_position_m",
+    "rmse_mocap_quaternion",
     "mocap_rmse_x_pos",
     "mocap_rmse_z_pos",
     "mocap_rmse_theta",
@@ -106,6 +112,21 @@ def _method_rows(
     return rows
 
 
+def _six_dof_rows(results_dir: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for raw in _read_csv(results_dir / "aircraft6dof_method_comparison.csv"):
+        record = {field: _coerce_value(field, raw.get(field)) for field in METHOD_RESULT_FIELDS}
+        for key, value in raw.items():
+            if key not in record:
+                record[key] = _coerce_value(key, value)
+        record["scenario"] = "aircraft_6dof_mixed"
+        record["scenario_title"] = "6-DOF mixed maneuver"
+        record["model_family"] = MODEL_FAMILY_6DOF
+        record["training_scenario"] = "aircraft_6dof_mixed"
+        rows.append(record)
+    return rows
+
+
 def _maneuver_rows(results_dir: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for raw in _read_csv(results_dir / "benchmark_maneuver_summary.csv"):
@@ -133,6 +154,7 @@ def export_web_data(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     method_rows = _method_rows(results_dir, dataset_modes, dataset_titles, method_training_modes)
+    method_rows.extend(_six_dof_rows(results_dir))
     maneuver_rows = _maneuver_rows(results_dir)
     generated_at = datetime.now(UTC).isoformat()
     git_sha = _git_sha(root)
@@ -145,12 +167,21 @@ def export_web_data(
         }
         for scenario in dataset_modes
     ]
+    if any(row.get("model_family") == MODEL_FAMILY_6DOF for row in method_rows):
+        scenarios.append(
+            {
+                "id": "aircraft_6dof_mixed",
+                "title": "6-DOF mixed maneuver",
+                "model_family": MODEL_FAMILY_6DOF,
+                "method_result_count": sum(1 for row in method_rows if row.get("scenario") == "aircraft_6dof_mixed"),
+            }
+        )
     method_registry = [metadata_to_dict(method) for method in all_method_metadata(root / "methods" / "plugins")]
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at,
         "git_sha": git_sha,
-        "model_families": [MODEL_FAMILY_3DOF],
+        "model_families": sorted({str(row.get("model_family")) for row in method_rows if row.get("model_family")} | {MODEL_FAMILY_3DOF}),
         "method_registry": method_registry,
         "files": {
             "method_results": "method_results.json",

@@ -47,6 +47,13 @@ MOCAP_ONLY_BUILTINS = {
     "Variational-Mocap",
 }
 
+SIX_DOF_BUILTINS = {
+    "6DOF-Nominal": ("direct", "mocap"),
+    "6DOF-LinearSS": ("direct", "mocap"),
+    "6DOF-RidgeResidual": ("direct", "mocap"),
+    "6DOF-MocapOutputARX": ("mocap",),
+}
+
 
 def builtin_method_metadata() -> list[MethodMetadata]:
     """Return plugin-style metadata for methods still implemented in comparison_suite.py."""
@@ -63,6 +70,18 @@ def builtin_method_metadata() -> list[MethodMetadata]:
                 training_scenarios=(training_scenario,),
                 requires_gpu=name in GPU_BUILTINS,
                 description="Built-in method currently dispatched by methods/comparison_suite.py.",
+            )
+        )
+    for name, observation_types in SIX_DOF_BUILTINS.items():
+        methods.append(
+            MethodMetadata(
+                name=name,
+                entry_point="models.aircraft6dof.comparison_suite:builtin",
+                model_families=("aircraft6dof",),
+                observation_types=observation_types,
+                training_scenarios=("aircraft_6dof_mixed",),
+                requires_gpu=False,
+                description="Built-in 6DOF baseline dispatched by methods/models/aircraft6dof/comparison_suite.py.",
             )
         )
     return methods

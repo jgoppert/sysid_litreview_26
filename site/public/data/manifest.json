@@ -3,9 +3,72 @@
     "maneuver_summary": "maneuver_summary.json",
     "method_results": "method_results.json"
   },
-  "generated_at": "2026-05-01T02:04:12.600817+00:00",
-  "git_sha": "64ff32e4f260c47adb6f75a31239706ee475a8f8",
+  "generated_at": "2026-05-01T02:43:45.304990+00:00",
+  "git_sha": "2d0b873d8c0c92537b538782c908a8cbdbaaf423",
   "method_registry": [
+    {
+      "description": "Built-in 6DOF baseline dispatched by methods/models/aircraft6dof/comparison_suite.py.",
+      "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "model_families": [
+        "aircraft6dof"
+      ],
+      "name": "6DOF-LinearSS",
+      "observation_types": [
+        "direct",
+        "mocap"
+      ],
+      "requires_gpu": false,
+      "training_scenarios": [
+        "aircraft_6dof_mixed"
+      ]
+    },
+    {
+      "description": "Built-in 6DOF baseline dispatched by methods/models/aircraft6dof/comparison_suite.py.",
+      "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "model_families": [
+        "aircraft6dof"
+      ],
+      "name": "6DOF-MocapOutputARX",
+      "observation_types": [
+        "mocap"
+      ],
+      "requires_gpu": false,
+      "training_scenarios": [
+        "aircraft_6dof_mixed"
+      ]
+    },
+    {
+      "description": "Built-in 6DOF baseline dispatched by methods/models/aircraft6dof/comparison_suite.py.",
+      "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "model_families": [
+        "aircraft6dof"
+      ],
+      "name": "6DOF-Nominal",
+      "observation_types": [
+        "direct",
+        "mocap"
+      ],
+      "requires_gpu": false,
+      "training_scenarios": [
+        "aircraft_6dof_mixed"
+      ]
+    },
+    {
+      "description": "Built-in 6DOF baseline dispatched by methods/models/aircraft6dof/comparison_suite.py.",
+      "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "model_families": [
+        "aircraft6dof"
+      ],
+      "name": "6DOF-RidgeResidual",
+      "observation_types": [
+        "direct",
+        "mocap"
+      ],
+      "requires_gpu": false,
+      "training_scenarios": [
+        "aircraft_6dof_mixed"
+      ]
+    },
     {
       "description": "Built-in method currently dispatched by methods/comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
@@ -378,7 +441,8 @@
     "validation_score": "Mean state NRMSE over open-loop validation rollouts; lower is better."
   },
   "model_families": [
-    "aircraft3dof"
+    "aircraft3dof",
+    "aircraft6dof"
   ],
   "scenarios": [
     {
@@ -428,6 +492,12 @@
       "method_result_count": 42,
       "model_family": "aircraft3dof",
       "title": "Aggressive SAFE recovery-probe maneuver"
+    },
+    {
+      "id": "aircraft_6dof_mixed",
+      "method_result_count": 7,
+      "model_family": "aircraft6dof",
+      "title": "6-DOF mixed maneuver"
     }
   ],
   "schema_version": "0.1.0"

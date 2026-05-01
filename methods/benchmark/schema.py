@@ -4,6 +4,7 @@ from __future__ import annotations
 
 SCHEMA_VERSION = "0.1.0"
 MODEL_FAMILY_3DOF = "aircraft3dof"
+MODEL_FAMILY_6DOF = "aircraft6dof"
 
 METHOD_RESULT_FIELDS = (
     "scenario",
@@ -31,6 +32,12 @@ METHOD_RESULT_FIELDS = (
     "rmse_alpha",
     "rmse_gamma",
     "rmse_Q",
+    "rmse_position_m",
+    "rmse_velocity_mps",
+    "rmse_quaternion",
+    "rmse_rates_rad_s",
+    "rmse_mocap_position_m",
+    "rmse_mocap_quaternion",
     "mocap_rmse_x_pos",
     "mocap_rmse_z_pos",
     "mocap_rmse_theta",

@@ -55,7 +55,21 @@ methods/data/aircraft_6dof_mixed/
   preview_trials.svg
 ```
 
-This dataset uses the current 6DOF smoke dynamics to stabilize the state/input/measurement interface. It is not yet the final nonlinear 6DOF aerodynamic benchmark.
+Run the full local 6DOF baseline workflow:
+
+```bash
+./results.py all-6dof
+```
+
+This generates the train/validation data, runs the implemented 6DOF baselines,
+exports website JSON, and refreshes LaTeX-ready figures/tables. The generated
+dataset is intentionally ignored by git; the committed benchmark artifacts live
+under `methods/results/`, `methods/tables/`, `methods/fig/`, and
+`site/public/data/`.
+
+The current 6DOF dynamics are still a compact interface benchmark. They
+stabilize the state, input, mocap-observation, method, website, and LaTeX paths
+before the final nonlinear 6DOF aerodynamic benchmark is added.
 
 ## Local GPU Benchmark
 

@@ -1,0 +1,16 @@
+{
+  "dataset": "/home/jgoppert/git/system_identification/methods/data/aircraft_6dof_mixed",
+  "methods": [
+    "6DOF-LinearSS",
+    "6DOF-MocapOutputARX",
+    "6DOF-Nominal",
+    "6DOF-RidgeResidual"
+  ],
+  "metric": "Validation score is full-state mean NRMSE for state predictors and mocap-output NRMSE for 6DOF-MocapOutputARX.",
+  "model_family": "aircraft6dof",
+  "result_rows": 7,
+  "state_sources": [
+    "direct",
+    "mocap"
+  ]
+}
