@@ -125,11 +125,12 @@ def _six_dof_rows(results_dir: Path) -> list[dict[str, Any]]:
         for key, value in raw.items():
             if key not in record:
                 record[key] = _coerce_value(key, value)
-        scenario = str(record.get("training_scenario") or "aircraft_6dof_aggressive")
+        scenario = str(record.get("validation_scenario") or record.get("scenario") or "aircraft_6dof_aggressive")
         record["scenario"] = scenario
         record["scenario_title"] = SIX_DOF_SCENARIOS.get(scenario, scenario.replace("_", " ").title())
         record["model_family"] = MODEL_FAMILY_6DOF
-        record["training_scenario"] = scenario
+        record["training_scenario"] = raw.get("training_scenario") or record.get("training_scenario") or "aircraft_6dof_aggressive"
+        record["validation_scenario"] = scenario
         rows.append(record)
     return rows
 

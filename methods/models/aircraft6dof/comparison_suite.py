@@ -44,6 +44,28 @@ SCENARIO_TITLES = {
     "aircraft_6dof_trim_grid": "Trim grid",
 }
 SCENARIO_ORDER = tuple(SCENARIO_TITLES)
+METHOD_TRAINING_SCENARIOS = {
+    "6DOF-Nominal": "none",
+    "6DOF-LinearSS": "aircraft_6dof_trim_grid",
+    "6DOF-Model-Stitching": "aircraft_6dof_trim_grid",
+    "6DOF-Subspace-Hankel": "aircraft_6dof_trim_grid",
+    "6DOF-Frequency-Welch": "aircraft_6dof_trim_grid",
+    "6DOF-Frequency-Stitching": "aircraft_6dof_trim_grid",
+    "6DOF-Koopman-EDMD": "aircraft_6dof_aggressive",
+    "6DOF-EquationError-LS": "aircraft_6dof_aggressive",
+    "6DOF-EKF-ParamID": "aircraft_6dof_aggressive",
+    "6DOF-Fisher-UQ": "aircraft_6dof_aggressive",
+    "6DOF-OEM-SS": "aircraft_6dof_aggressive",
+    "6DOF-RidgeResidual": "aircraft_6dof_aggressive",
+    "6DOF-OEM-MocapOutput": "aircraft_6dof_aggressive",
+    "6DOF-Variational-Mocap": "aircraft_6dof_aggressive",
+    "6DOF-SINDy": "aircraft_6dof_aggressive",
+    "6DOF-Symbolic-Stepwise": "aircraft_6dof_aggressive",
+    "6DOF-GP-RBF": "aircraft_6dof_aggressive",
+    "6DOF-UDE-Residual": "aircraft_6dof_aggressive",
+    "6DOF-PINN-Closure": "aircraft_6dof_aggressive",
+    "6DOF-NN-Surrogate": "aircraft_6dof_aggressive",
+}
 
 
 @dataclass
@@ -82,6 +104,7 @@ class Result6DOF:
     rmse_mocap_position_m: float
     rmse_mocap_quaternion: float
     notes: str
+    training_scenario: str = ""
     x_pred: np.ndarray | None = None
     y_pred: np.ndarray | None = None
 
@@ -612,24 +635,43 @@ def score_state_method(
     )
 
 
-def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridge: float, workers: int) -> list[Result6DOF]:
-    config = Aircraft6DOFConfig(duration=float(train.t[-1] - train.t[0]), dt=train.dt)
+def run_methods(train_splits: dict[str, Split6DOF], validation: Split6DOF, state_source: str, ridge: float, workers: int) -> list[Result6DOF]:
+    config = Aircraft6DOFConfig(duration=float(validation.t[-1] - validation.t[0]), dt=validation.dt)
     if state_source == "direct":
-        train_x = train.y_meas
         validation_x0 = validation.y_meas[:, 0, :]
     elif state_source == "mocap":
-        train_x = derive_state_from_mocap(train.mocap_meas, train.t)
         validation_x0 = derive_state_from_mocap(validation.mocap_meas[:, : min(21, len(validation.t)), :], validation.t[: min(21, len(validation.t))])[:, 0, :]
     else:
         raise ValueError(f"unsupported state source: {state_source}")
 
+    training_cache: dict[str, tuple[Split6DOF, np.ndarray]] = {}
+
+    def training_context(method: str) -> tuple[str, Split6DOF, np.ndarray, int]:
+        scenario = METHOD_TRAINING_SCENARIOS.get(method, "aircraft_6dof_aggressive")
+        if scenario == "none":
+            fallback = train_splits.get("aircraft_6dof_open_loop") or next(iter(train_splits.values()))
+            return scenario, fallback, fallback.y_meas, 0
+        if scenario not in training_cache:
+            split = train_splits[scenario]
+            if state_source == "direct":
+                split_x = split.y_meas
+            else:
+                split_x = derive_state_from_mocap(split.mocap_meas, split.t)
+            training_cache[scenario] = (split, split_x)
+        split, split_x = training_cache[scenario]
+        train_samples = int(np.prod(split_x[:, :-1, :].shape[:2]))
+        return scenario, split, split_x, train_samples
+
+    def add_result(result: Result6DOF) -> None:
+        result.training_scenario = METHOD_TRAINING_SCENARIOS.get(result.method, "aircraft_6dof_aggressive")
+        results.append(result)
+
     results: list[Result6DOF] = []
-    train_samples = int(np.prod(train_x[:, :-1, :].shape[:2]))
 
     start = time.perf_counter()
     pred = parallel_rollout("nominal_rollout", workers, validation_x0, validation.u_cmd, validation.t, config)
     rollout_elapsed = time.perf_counter() - start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-Nominal",
             "Attached-flow nominal 6DOF rollout using pilot commands and no fitted stall correction.",
@@ -648,13 +690,14 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
 
     start = time.perf_counter()
     cpu_start = time.process_time()
+    _scenario, train, train_x, train_samples = training_context("6DOF-LinearSS")
     weights = ridge_fit(design_matrix(train_x[:, :-1, :], train.u_cmd[:, :-1, :]), train_x[:, 1:, :], ridge)
     train_elapsed = time.perf_counter() - start
     train_cpu = time.process_time() - cpu_start
     rollout_start = time.perf_counter()
     pred = parallel_rollout("linear_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-LinearSS",
             "Global affine discrete state-space fit x[k+1]=A x[k]+B u_cmd[k]+c.",
@@ -673,6 +716,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
 
     start = time.perf_counter()
     cpu_start = time.process_time()
+    _scenario, train, train_x, train_samples = training_context("6DOF-RidgeResidual")
     print(f"  {state_source}: nominal residual targets using {workers} workers", flush=True)
     nominal_next = parallel_nominal_next(train_x, train.u_cmd, train.dt, config, workers)
     residual = train_x[:, 1:, :] - nominal_next
@@ -682,7 +726,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("residual_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights, config)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-RidgeResidual",
             "Nominal RK4 model plus ridge-fitted one-step residual correction.",
@@ -701,6 +745,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
 
     start = time.perf_counter()
     cpu_start = time.process_time()
+    _scenario, train, train_x, train_samples = training_context("6DOF-Model-Stitching")
     centers = make_local_centers(train_x)
     local_weights = fit_local_linear_models(train_x, train.u_cmd, train_x[:, 1:, :], centers, ridge)
     train_elapsed = time.perf_counter() - start
@@ -708,7 +753,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("local_linear_rollout", workers, validation_x0, validation.u_cmd, validation.t, centers, local_weights, residual=False, config=config)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-Model-Stitching",
             "Airdata-scheduled family of local affine one-step state models.",
@@ -727,13 +772,14 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
 
     start = time.perf_counter()
     cpu_start = time.process_time()
+    _scenario, train, train_x, train_samples = training_context("6DOF-Frequency-Welch")
     weights_freq = ridge_fit(design_matrix(train_x[:, :-1, :], train.u_cmd[:, :-1, :]), train_x[:, 1:, :], 25.0 * ridge)
     train_elapsed = time.perf_counter() - start
     train_cpu = time.process_time() - cpu_start
     rollout_start = time.perf_counter()
     pred = parallel_rollout("linear_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_freq)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-Frequency-Welch",
             "Frequency-domain-inspired global linear baseline approximated by a regularized one-step realization.",
@@ -752,13 +798,17 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
 
     start = time.perf_counter()
     cpu_start = time.process_time()
-    local_residual_weights = fit_local_linear_models(train_x, train.u_cmd, residual, centers, 10.0 * ridge)
+    _scenario, train, train_x, train_samples = training_context("6DOF-Frequency-Stitching")
+    centers = make_local_centers(train_x)
+    nominal_next_local = parallel_nominal_next(train_x, train.u_cmd, train.dt, config, workers)
+    residual_local = train_x[:, 1:, :] - nominal_next_local
+    local_residual_weights = fit_local_linear_models(train_x, train.u_cmd, residual_local, centers, 10.0 * ridge)
     train_elapsed = time.perf_counter() - start
     train_cpu = time.process_time() - cpu_start
     rollout_start = time.perf_counter()
     pred = parallel_rollout("local_linear_rollout", workers, validation_x0, validation.u_cmd, validation.t, centers, local_residual_weights, residual=True, config=config)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-Frequency-Stitching",
             "Airdata-scheduled local realization residuals around the nominal 6DOF equations.",
@@ -777,13 +827,16 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
 
     start = time.perf_counter()
     cpu_start = time.process_time()
+    _scenario, train, train_x, train_samples = training_context("6DOF-EKF-ParamID")
+    nominal_next = parallel_nominal_next(train_x, train.u_cmd, train.dt, config, workers)
+    residual = train_x[:, 1:, :] - nominal_next
     weights_ekf = ridge_fit(design_matrix(train_x[:, :-1, :], train.u_cmd[:, :-1, :]), residual, 5.0 * ridge)
     train_elapsed = time.perf_counter() - start
     train_cpu = time.process_time() - cpu_start
     rollout_start = time.perf_counter()
     pred = parallel_rollout("residual_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_ekf, config)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-EKF-ParamID",
             "Recursive-estimation analogue represented by a fitted affine residual parameter vector.",
@@ -800,7 +853,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
         )
     )
 
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-Fisher-UQ",
             "Fisher-information wrapper around the fitted residual parameter model.",
@@ -817,7 +870,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
         )
     )
 
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-OEM-SS",
             "Output-error state-space residual model using the same open-loop rollout structure as the fitted parameter model.",
@@ -834,6 +887,8 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
         )
     )
 
+    _scenario, train, train_x, train_samples = training_context("6DOF-EquationError-LS")
+    nominal_next = parallel_nominal_next(train_x, train.u_cmd, train.dt, config, workers)
     xk = train_x[:, :-1, :]
     uk = train.u_cmd[:, :-1, :]
     xkp1 = train_x[:, 1:, :]
@@ -857,7 +912,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("derivative_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_deriv, mean_deriv, scale_deriv, degree=1)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-EquationError-LS",
             "Affine derivative regression rolled out open-loop with explicit integration.",
@@ -886,7 +941,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("derivative_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_var, mean_var, scale_var, degree=1)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-Variational-Mocap",
             "Smoothed weak-form derivative fit used as a lightweight variational baseline.",
@@ -913,7 +968,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("derivative_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_sindy, mean_sindy, scale_sindy, degree=2)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-SINDy",
             "Sparse quadratic-library derivative model for the full 6DOF state.",
@@ -939,7 +994,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("one_step_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_symbolic, mean_symbolic, scale_symbolic, degree=2)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-Symbolic-Stepwise",
             "Sparse stepwise quadratic one-step predictor.",
@@ -964,7 +1019,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("one_step_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_edmd, mean_edmd, scale_edmd, degree=2)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-Koopman-EDMD",
             "Quadratic lifted one-step predictor rolled out in the original state coordinates.",
@@ -991,7 +1046,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("residual_feature_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_ude, mean_ude, scale_ude, config, degree=2)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-UDE-Residual",
             "Attached-flow nominal dynamics plus quadratic learned residual map.",
@@ -1016,7 +1071,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("residual_feature_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_pinn, mean_ude, scale_ude, config, degree=2)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-PINN-Closure",
             "Physics-structured residual closure constrained to the attached-flow 6DOF equations.",
@@ -1033,6 +1088,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
         )
     )
 
+    _scenario, train, train_x, train_samples = training_context("6DOF-Subspace-Hankel")
     start = time.perf_counter()
     cpu_start = time.process_time()
     lag = 3
@@ -1048,7 +1104,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("lagged_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_hankel, lag=lag)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-Subspace-Hankel",
             "Lagged ARX/Hankel linear predictor using a three-sample state history.",
@@ -1065,6 +1121,12 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
         )
     )
 
+    _scenario, train, train_x, train_samples = training_context("6DOF-GP-RBF")
+    nominal_next = parallel_nominal_next(train_x, train.u_cmd, train.dt, config, workers)
+    xk = train_x[:, :-1, :]
+    uk = train.u_cmd[:, :-1, :]
+    xkp1 = train_x[:, 1:, :]
+    residual = xkp1 - nominal_next
     start = time.perf_counter()
     cpu_start = time.process_time()
     z = np.concatenate((xk.reshape(-1, len(STATE_NAMES)), uk.reshape(-1, len(INPUT_NAMES))), axis=1)
@@ -1084,7 +1146,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("rbf_residual_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_rbf, centers, length_scale, config)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-GP-RBF",
             "Sparse RBF/Gaussian-process-style residual surrogate around attached-flow dynamics.",
@@ -1113,7 +1175,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     rollout_start = time.perf_counter()
     pred = parallel_rollout("nn_residual_rollout", workers, validation_x0, validation.u_cmd, validation.t, weights_nn, nn_centers, length_scale, config)
     rollout_elapsed = time.perf_counter() - rollout_start
-    results.append(
+    add_result(
         score_state_method(
             "6DOF-NN-Surrogate",
             "Random-feature neural-surrogate analogue for residual dynamics.",
@@ -1131,6 +1193,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     )
 
     if state_source == "mocap":
+        _scenario, train, _train_x, _train_samples = training_context("6DOF-OEM-MocapOutput")
         start = time.perf_counter()
         cpu_start = time.process_time()
         weights_y = ridge_fit(design_matrix(train.mocap_meas[:, :-1, :], train.u_cmd[:, :-1, :]), train.mocap_meas[:, 1:, :], ridge)
@@ -1140,7 +1203,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
         y_pred = parallel_rollout("mocap_output_rollout", workers, validation.mocap_meas[:, 0, :], validation.u_cmd, validation.t, weights_y)
         rollout_elapsed = time.perf_counter() - rollout_start
         score, metrics = mocap_score(y_pred, validation.mocap_true)
-        results.append(
+        add_result(
             Result6DOF(
                 method="6DOF-OEM-MocapOutput",
                 description="Affine open-loop predictor on mocap position/quaternion outputs.",
@@ -1178,7 +1241,11 @@ def dataset_scenario(dataset: Path) -> str:
     return "aircraft_6dof_aggressive"
 
 
-def result_to_row(result: Result6DOF, scenario: str) -> dict[str, object]:
+def default_dataset_path(scenario: str) -> Path:
+    return METHODS_ROOT / "data" / scenario
+
+
+def result_to_row(result: Result6DOF, validation_scenario: str) -> dict[str, object]:
     return {
         "method": result.method,
         "description": result.description,
@@ -1188,9 +1255,10 @@ def result_to_row(result: Result6DOF, scenario: str) -> dict[str, object]:
         "state_source": result.state_source,
         "input_channel": "u_cmd",
         "evaluation_mode": "open_loop",
-        "training_scenario": scenario,
-        "scenario": scenario,
-        "scenario_title": SCENARIO_TITLES.get(scenario, scenario.replace("aircraft_6dof_", "").replace("_", " ").title()),
+        "training_scenario": result.training_scenario,
+        "validation_scenario": validation_scenario,
+        "scenario": validation_scenario,
+        "scenario_title": SCENARIO_TITLES.get(validation_scenario, validation_scenario.replace("aircraft_6dof_", "").replace("_", " ").title()),
         "validation_score": result.validation_score,
         "train_elapsed_s": result.train_elapsed_s,
         "train_cpu_s": result.train_cpu_s,
@@ -1228,8 +1296,8 @@ def write_table(rows: list[dict[str, object]], path: Path) -> None:
         stream.write("% Generated by aircraft6dof comparison suite. Do not edit by hand.\n")
         stream.write(r"\begingroup\scriptsize\setlength{\tabcolsep}{2pt}" + "\n")
         if include_scenario:
-            stream.write(r"\begin{longtable}{p{0.25\linewidth}p{0.12\linewidth}lrrrrp{0.15\linewidth}}" + "\n")
-            header = r"Method & Scenario & Source & Score & Train [s] & Rollout [s] & Pos. RMSE & Backend \\"
+            stream.write(r"\begin{longtable}{p{0.20\linewidth}p{0.10\linewidth}p{0.10\linewidth}lrrrrp{0.13\linewidth}}" + "\n")
+            header = r"Method & Train & Val. & Source & Score & Train [s] & Rollout [s] & Pos. RMSE & Backend \\"
         else:
             stream.write(r"\begin{longtable}{p{0.31\linewidth}lrrrrp{0.18\linewidth}}" + "\n")
             header = r"Method & Source & Score & Train [s] & Rollout [s] & Pos. RMSE & Backend \\"
@@ -1247,7 +1315,8 @@ def write_table(rows: list[dict[str, object]], path: Path) -> None:
                 str(row["method"]).replace("_", r"\_"),
             ]
             if include_scenario:
-                fields.append(str(row.get("scenario_title", row.get("scenario", ""))).replace("_", r"\_"))
+                fields.append(scenario_label(row.get("training_scenario", "")).replace("_", r"\_"))
+                fields.append(scenario_label(row.get("validation_scenario", row.get("scenario", ""))).replace("_", r"\_"))
             fields.extend(
                 [
                     str(row["state_source"]),
@@ -1272,6 +1341,13 @@ def _fmt(value: object) -> str:
     if not np.isfinite(number):
         return "--"
     return f"{number:.3g}"
+
+
+def scenario_label(scenario: object) -> str:
+    text = str(scenario)
+    if text == "none":
+        return "No fit"
+    return SCENARIO_TITLES.get(text, text.replace("aircraft_6dof_", "").replace("_", " ").title())
 
 
 def plot_scores(rows: list[dict[str, object]], output: Path) -> None:
@@ -1550,6 +1626,7 @@ def write_manifest(datasets: list[Path], rows: list[dict[str, object]], output: 
         "model_family": "aircraft6dof",
         "datasets": [str(dataset) for dataset in datasets],
         "scenarios": sorted({str(row.get("scenario", "")) for row in rows}),
+        "training_scenarios": sorted({str(row.get("training_scenario", "")) for row in rows}),
         "methods": sorted({str(row["method"]) for row in rows}),
         "state_sources": sorted({str(row["state_source"]) for row in rows}),
         "metric": "Validation score is full-state mean NRMSE for state predictors and mocap-output NRMSE for 6DOF-OEM-MocapOutput.",
@@ -1575,6 +1652,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     datasets = list(args.datasets) if args.datasets else [args.dataset]
+    provided_paths = {dataset_scenario(dataset): dataset for dataset in datasets}
+    required_training = {scenario for scenario in METHOD_TRAINING_SCENARIOS.values() if scenario != "none"}
+    train_splits: dict[str, Split6DOF] = {}
+    for scenario in sorted(required_training):
+        path = provided_paths.get(scenario, default_dataset_path(scenario))
+        train_file = path / "train.npz"
+        if not train_file.exists():
+            raise SystemExit(f"Required 6DOF training split missing for {scenario}: {train_file}")
+        train_splits[scenario] = load_split(train_file)
     sources = ["direct", "mocap"] if args.state_source == "both" else [args.state_source]
     results: list[Result6DOF] = []
     rows: list[dict[str, object]] = []
@@ -1582,12 +1668,11 @@ def main() -> int:
     trajectory_validation: Split6DOF | None = None
     for dataset in datasets:
         scenario = dataset_scenario(dataset)
-        train = load_split(dataset / "train.npz")
         validation = load_split(dataset / "validation.npz")
         dataset_results: list[Result6DOF] = []
         for source in sources:
             print(f"running 6DOF {source} methods on {scenario} with {args.workers} rollout workers", flush=True)
-            dataset_results.extend(run_methods(train, validation, source, args.ridge, args.workers))
+            dataset_results.extend(run_methods(train_splits, validation, source, args.ridge, args.workers))
         rows.extend(result_to_row(result, scenario) for result in dataset_results)
         if trajectory_validation is None or scenario == "aircraft_6dof_aggressive":
             trajectory_validation = validation

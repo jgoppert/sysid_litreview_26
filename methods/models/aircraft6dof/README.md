@@ -57,8 +57,9 @@ Run the full local 6DOF workflow:
 ```
 
 The full workflow generates the standard dataset family, runs the baseline
-comparison on each dataset, exports GitHub Pages JSON, and refreshes
-LaTeX-ready tables and figures. Generated datasets are written to
+comparison with explicit method-specific training splits and validation splits,
+exports GitHub Pages JSON, and refreshes LaTeX-ready tables and figures.
+Generated datasets are written to
 `methods/data/aircraft_6dof_*` and are intentionally ignored by git. The
 available 6DOF dataset modes are:
 
@@ -66,6 +67,13 @@ available 6DOF dataset modes are:
 - `sine_sweep`: chirp-like elevator, throttle, aileron, and rudder excitation.
 - `aggressive`: large pulses and multisine inputs that drive stall onset, drag rise, pull-up, and recovery.
 - `trim_grid`: local small-deviation inputs around a grid of speed, angle-of-attack, and sideslip operating points.
+
+Training/validation assignment:
+
+- no-fit rows such as `6DOF-Nominal` use no training split;
+- local linear, model-stitching, subspace, and frequency-stitching rows train on `aircraft_6dof_trim_grid`;
+- nonlinear residual, surrogate, symbolic, SINDy, and output-error-style rows train on `aircraft_6dof_aggressive`;
+- every trained model is validated open-loop against each requested validation dataset using only the validation initial condition and pilot commands.
 
 Current baseline methods:
 

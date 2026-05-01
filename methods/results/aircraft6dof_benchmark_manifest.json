@@ -39,5 +39,10 @@
   "state_sources": [
     "direct",
     "mocap"
+  ],
+  "training_scenarios": [
+    "aircraft_6dof_aggressive",
+    "aircraft_6dof_trim_grid",
+    "none"
   ]
 }

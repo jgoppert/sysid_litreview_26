@@ -18,6 +18,7 @@ METHOD_RESULT_FIELDS = (
     "input_channel",
     "evaluation_mode",
     "training_scenario",
+    "validation_scenario",
     "validation_score",
     "train_elapsed_s",
     "train_cpu_s",
