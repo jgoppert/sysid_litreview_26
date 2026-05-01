@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>System Identification Benchmarks</title>
+    <link rel="stylesheet" href="./src/styles.css">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Aircraft system identification</p>
+        <h1>Benchmark Results</h1>
+      </div>
+      <div class="run-meta" id="run-meta">Loading benchmark data...</div>
+    </header>
+
+    <main class="layout">
+      <section class="controls" aria-label="Benchmark filters">
+        <label>
+          Scenario
+          <select id="scenario-select"></select>
+        </label>
+        <div>
+          <span class="control-label">State source</span>
+          <div class="segmented" id="source-filter">
+            <button type="button" data-source="direct" class="active">Direct</button>
+            <button type="button" data-source="mocap">Mocap</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="summary-grid" aria-label="Scenario summary">
+        <div class="metric">
+          <span>Best method</span>
+          <strong id="best-method">--</strong>
+        </div>
+        <div class="metric">
+          <span>Best validation NRMSE</span>
+          <strong id="best-score">--</strong>
+        </div>
+        <div class="metric">
+          <span>Methods compared</span>
+          <strong id="method-count">--</strong>
+        </div>
+        <div class="metric">
+          <span>Maneuver envelope</span>
+          <strong id="maneuver-envelope">--</strong>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <div>
+            <h2>Cost-Error Tradeoff</h2>
+            <p>Horizontal position is training time. Vertical position is mean state NRMSE. Lower is better.</p>
+          </div>
+        </div>
+        <div id="tradeoff-plot" class="plot" role="img" aria-label="Training time versus validation error plot"></div>
+      </section>
+
+      <section class="two-column">
+        <div class="panel">
+          <div class="panel-heading">
+            <h2>Leaderboard</h2>
+            <p>Sorted by validation NRMSE for the selected scenario and state source.</p>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Method</th>
+                  <th>Score</th>
+                  <th>Train s</th>
+                  <th>Rollout s</th>
+                  <th>Training data</th>
+                </tr>
+              </thead>
+              <tbody id="leaderboard-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-heading">
+            <h2>Maneuver Summary</h2>
+            <p>Envelope statistics from the generated validation maneuvers.</p>
+          </div>
+          <dl class="maneuver-list" id="maneuver-list"></dl>
+        </div>
+      </section>
+    </main>
+
+    <script src="./src/app.js" type="module"></script>
+  </body>
+</html>
