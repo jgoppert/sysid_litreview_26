@@ -231,16 +231,84 @@ The truth model computes airdata from body velocity,
 \[
 V=\|\mathbf{v}_b\|,\qquad \alpha=\tan^{-1}(w/u),\qquad \beta=\sin^{-1}(v/V),
 \]
-and dynamic pressure $\bar{q}=\frac{1}{2}\rho V^2$. Attached-flow lift, drag, pitching moment, side-force, roll-moment, and yaw-moment coefficients are evaluated from $\alpha,\beta$, nondimensional rates, and control deflections. A smooth stall gate
+and dynamic pressure $\bar{q}=\frac{1}{2}\rho V^2$. The nondimensional rates used by the aerodynamic model are
+\[
+\hat{p}=\frac{bp}{2V},\qquad
+\hat{q}=\frac{cq}{2V},\qquad
+\hat{r}=\frac{br}{2V},
+\]
+where $b$ is span and $c$ is mean aerodynamic chord. The attached-flow longitudinal coefficients are
+\begin{align}
+C_{L,\mathrm{att}} &= 0.27 + 5.20\alpha + 0.36\delta_e + 3.10\hat{q}, \label{eq:sixdof_cl_att}\\
+C_{D,\mathrm{att}} &= 0.045 + 0.075C_{L,\mathrm{att}}^2 + 0.42\beta^2
+    +0.018(\delta_a^2+\delta_r^2)+0.010\delta_e^2, \label{eq:sixdof_cd_att}\\
+C_{m,\mathrm{att}} &= 0.030 - 1.05\alpha - 1.15\delta_e - 9.0\hat{q}. \label{eq:sixdof_cm_att}
+\end{align}
+A smooth stall gate
 \[
 \sigma(\alpha)=\left(1+\exp\left[-\frac{|\alpha|-\alpha_{\mathrm{stall}}}{\Delta\alpha_{\mathrm{stall}}}\right]\right)^{-1}
 \]
-blends the attached lift curve into a finite post-stall lift model, adds post-stall drag rise, applies pitch-break moment, reduces control effectiveness, and adds nonlinear lateral-directional coupling. Body aerodynamic forces are then
+uses $\alpha_{\mathrm{stall}}=14^\circ$ and $\Delta\alpha_{\mathrm{stall}}=2.2^\circ$ in the current code. Define
+\[
+s_\alpha=\operatorname{sign}(\alpha),\qquad
+\epsilon_\alpha=\max(|\alpha|-\alpha_{\mathrm{stall}},0),\qquad
+C_{L,\lim}=\begin{cases}1.28,&\alpha\ge 0,\\0.95,&\alpha<0,\end{cases}
+\]
+and
+\[
+C_{L,\mathrm{post}}=s_\alpha\max(0.28,\;C_{L,\lim}-1.65\epsilon_\alpha),\qquad
+\eta_\delta=1-0.58\sigma.
+\]
+The nonlinear truth lift, drag, and pitching moment are
+\begin{align}
+C_L &= (1-\sigma)C_{L,\mathrm{att}}+\sigma C_{L,\mathrm{post}}
+ +(1-0.45\sigma)\left(0.045\sin(2\alpha)\cos\beta+0.020\delta_e\hat{q}\right), \label{eq:sixdof_cl_truth}\\
+C_D &= C_{D,\mathrm{att}}+\sigma\left(0.16+1.45\epsilon_\alpha+5.5\epsilon_\alpha^2\right), \label{eq:sixdof_cd_truth}\\
+C_m &= C_{m,\mathrm{att}}
+ -\sigma s_\alpha\left(0.18+0.90\epsilon_\alpha\right)
+ -0.035\sigma\tanh(4\delta_e). \label{eq:sixdof_cm_truth}
+\end{align}
+The lateral-directional truth coefficients are
+\begin{align}
+C_Y &= -0.82\beta + 0.30\delta_r + 0.12\delta_a - 0.35\hat{r}
+ +\sigma\left[-0.22\beta|\beta|+0.08\sin(3\alpha)\delta_r\right], \label{eq:sixdof_cy_truth}\\
+C_l &= -0.12\beta + 0.42\eta_\delta\delta_a - 0.50\hat{p} + 0.10\hat{r}
+ +\sigma(-0.18\beta+0.06\delta_r), \label{eq:sixdof_clroll_truth}\\
+C_n &= 0.18\beta - 0.26\eta_\delta\delta_r - 0.08\delta_a - 0.42\hat{r}
+ +\sigma(0.10\beta-0.05\delta_a). \label{eq:sixdof_cn_truth}
+\end{align}
+The nominal 6-DOF model used by \texttt{nominal\_rk4\_step} sets $\sigma=0$ and removes every explicitly nonlinear stall/residual term in \eqref{eq:sixdof_cl_truth}--\eqref{eq:sixdof_cn_truth}. The truth model used by \texttt{rk4\_step} keeps those terms. This nominal/truth split is the 6-DOF analogue of the hidden residual-aerodynamics problem in the 3-DOF benchmark.
+
+Body aerodynamic forces are then
 \[
 \begin{bmatrix}F_X&F_Y&F_Z\end{bmatrix}^T
 = \bar{q}S\begin{bmatrix}C_X&C_Y&C_Z\end{bmatrix}^T,
 \]
-with $C_X=-C_D\cos\alpha+C_L\sin\alpha$ and $C_Z=-C_D\sin\alpha-C_L\cos\alpha$. Moments are scaled by $\bar{q}S[bC_l,cC_m,bC_n]^T$. Propeller thrust acts along body $x$ and contributes a small pitching moment. The dataset stores both the truth coefficients and an attached-flow nominal coefficient set; their difference is the hidden nonlinear aerodynamic residual.
+with
+\[
+C_X=-C_D\cos\alpha+C_L\sin\alpha,\qquad
+C_Z=-C_D\sin\alpha-C_L\cos\alpha.
+\]
+Moments are
+\[
+\mathbf{M}_{\mathrm{aero}}=\bar{q}S
+\begin{bmatrix}
+bC_l & cC_m & bC_n
+\end{bmatrix}^T.
+\]
+The propeller model is
+\[
+T=T_{\max}\delta_T^{1.45},\qquad
+\mathbf{F}_{\mathrm{prop}}=\begin{bmatrix}T&0&0\end{bmatrix}^T,\qquad
+\mathbf{M}_{\mathrm{prop}}=\begin{bmatrix}0&\ell_TT&0\end{bmatrix}^T,
+\]
+with $T_{\max}=8.8\,\mathrm{N}$ and $\ell_T=0.035\,\mathrm{m}$. The coded body loads are
+\[
+\mathbf{F}_b=(1+0.22\delta_T)\mathbf{F}_{\mathrm{aero}}+\mathbf{F}_{\mathrm{prop}},
+\qquad
+\mathbf{M}_b=(1+0.22\delta_T)\mathbf{M}_{\mathrm{aero}}+\mathbf{M}_{\mathrm{prop}}.
+\]
+The dataset stores both the truth coefficients and an attached-flow nominal coefficient set; their difference is the hidden nonlinear aerodynamic residual.
 
 Two observation assumptions are evaluated. In the direct-state case, the method receives noisy measurements of all 13 states during training and the initial measured state during validation. In the mocap-derived case, the method receives position and quaternion attitude. Body velocity is reconstructed by differentiating mocap position and rotating the result into the body frame, while angular rate is reconstructed by differentiating the quaternion and solving the local quaternion-rate equation. These reconstructed velocity and rate channels are intentionally noisier than the direct-state channel.
 
