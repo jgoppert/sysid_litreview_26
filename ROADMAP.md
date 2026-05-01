@@ -141,6 +141,15 @@ Each chunk should be reviewed and committed before moving to the next one.
 
 Untrusted pull requests should run formatting, API validation, and small CPU smoke tests only. Full benchmarks, GPU runs, and self-hosted runner execution should require maintainer approval or run only after merge to a trusted branch.
 
+## Contribution Process
+
+Method contributions use a two-phase process:
+
+1. A contributor opens a method PR with plugin code and documentation only. CI validates metadata, imports, and smoke checks on GitHub-hosted CPU runners.
+2. After review and merge, a maintainer runs the full benchmark on trusted local GPU hardware and commits regenerated result artifacts separately.
+
+This keeps untrusted code away from self-hosted GPU machines and separates method review from benchmark-result review.
+
 ## Initial Milestone
 
 The first public milestone is a static GitHub Pages site that shows the current 3DOF benchmark results from committed CSV files. The site should make the existing benchmark easier to inspect before the 6DOF work expands the problem size.

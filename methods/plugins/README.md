@@ -43,3 +43,7 @@ python3 -m methods.benchmark.smoke_plugin methods/plugins/example_linear
 ```
 
 The current paper-scale suite still dispatches existing methods through `methods/comparison_suite.py`. The plugin contract is the public interface that new methods should target as the benchmark runner is refactored.
+
+## Result Generation Policy
+
+Method PRs should contain method code and documentation only. Do not include regenerated benchmark CSV files, figures, LaTeX generated files, or website JSON in the method PR. After review and merge, a maintainer will run the full benchmark on trusted hardware and commit result artifacts separately.

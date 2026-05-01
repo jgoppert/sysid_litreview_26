@@ -1,6 +1,6 @@
 # Self-Hosted NVIDIA GPU Runner
 
-Use a self-hosted runner for full benchmark execution on a local NVIDIA machine. The GitHub Pages workflow should remain lightweight and should only publish already-generated static data.
+Use a self-hosted runner for full benchmark execution on a local NVIDIA machine. The GitHub Pages workflow should remain lightweight and should only publish already-generated static data. Method pull requests should be validated separately with CPU-only smoke checks; full GPU benchmark results should be produced in a separate maintainer commit.
 
 ## Recommended Security Model
 
@@ -9,6 +9,7 @@ Use a self-hosted runner for full benchmark execution on a local NVIDIA machine.
 - Run the runner as a dedicated low-privilege OS user.
 - Give the runner a specific label such as `gpu`; do not use it for generic CI jobs.
 - Review method-contribution PRs with CPU smoke tests first, then run full GPU benchmarks after approval or after merge.
+- Commit regenerated benchmark artifacts separately from the method-code PR.
 
 ## One-Time Machine Setup
 
@@ -91,6 +92,13 @@ print(torch.cuda.is_available())
 print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "no cuda")
 PY
 ```
+
+## Two-Phase Results Update
+
+1. Merge or check out the trusted method-code change.
+2. Run the full benchmark locally or through the manual self-hosted workflow.
+3. Review regenerated CSV files, figures, LaTeX assets, website JSON, and paper output.
+4. Commit only the trusted generated results in a separate commit.
 
 ## Updating the Public Site
 

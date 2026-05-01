@@ -1,0 +1,46 @@
+name: Method PR Checks
+
+on:
+  pull_request:
+    paths:
+      - "methods/benchmark/**"
+      - "methods/plugins/**"
+      - ".github/workflows/method-pr.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install smoke-test dependency
+        run: python -m pip install numpy
+
+      - name: Compile benchmark API
+        run: python -m py_compile methods/benchmark/*.py
+
+      - name: Validate plugin registry
+        run: python -m methods.benchmark.registry > /tmp/method_registry.json
+
+      - name: Smoke-test plugins
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r -d '' metadata; do
+            found=1
+            plugin_dir="$(dirname "$metadata")"
+            python -m methods.benchmark.smoke_plugin "$plugin_dir"
+          done < <(find methods/plugins -mindepth 2 -maxdepth 2 -name method.json -print0 | sort -z)
+          if [ "$found" -eq 0 ]; then
+            echo "No method plugins found."
+          fi
