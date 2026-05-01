@@ -148,6 +148,7 @@ ARCHIVED_RESULTS = [
 ]
 LATEX_GENERATED_PATTERNS = ("*.tex",)
 LATEX_GENERATED_FIGURE_PATTERNS = ("generated_*",)
+TRADEOFF_FAILURE_THRESHOLD = 1.0
 
 
 def methods_python() -> str:
@@ -485,6 +486,37 @@ def spread_log_labels(
     return placed
 
 
+def split_tradeoff_rows(rows: list[dict[str, str]], threshold: float = TRADEOFF_FAILURE_THRESHOLD) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    passed: list[dict[str, str]] = []
+    failed: list[dict[str, str]] = []
+    for row in rows:
+        if float(row["validation_score"]) > threshold:
+            failed.append(row)
+        else:
+            passed.append(row)
+    return passed, failed
+
+
+def add_failure_callout(ax, failed_rows: list[dict[str, str]], source: str, threshold: float = TRADEOFF_FAILURE_THRESHOLD) -> None:
+    if not failed_rows:
+        return
+    labels = [tradeoff_label(row["method"], source) for row in sorted(failed_rows, key=lambda row: float(row["validation_score"]), reverse=True)]
+    shown = ", ".join(labels[:4])
+    if len(labels) > 4:
+        shown += f", +{len(labels) - 4}"
+    ax.text(
+        0.98,
+        0.98,
+        f"failed > {threshold:g}: {shown}",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=6.2,
+        color="0.25",
+        bbox={"boxstyle": "round,pad=0.22", "facecolor": "white", "edgecolor": "0.7", "alpha": 0.88},
+    )
+
+
 def plot_train_time_accuracy() -> None:
     import matplotlib.pyplot as plt
     import numpy as np
@@ -495,12 +527,15 @@ def plot_train_time_accuracy() -> None:
         ("mocap", "Mocap-derived benchmark", "#f58518"),
     ]
     fig, axes = plt.subplots(1, 2, figsize=(11.8, 5.2), sharey=True)
-    all_scores = [
+    passed_scores = [
         max(float(row["validation_score"]), 1e-4)
         for row in rows
-        if row.get("state_source") in {"direct", "mocap"}
+        if row.get("state_source") in {"direct", "mocap"} and float(row["validation_score"]) <= TRADEOFF_FAILURE_THRESHOLD
     ]
-    y_limits = (max(min(all_scores) * 0.45, 6e-3), max(all_scores) * 4.0)
+    y_limits = (
+        max(min(passed_scores) * 0.45, 6e-3),
+        max(min(max(passed_scores) * 2.2, TRADEOFF_FAILURE_THRESHOLD * 1.1), 0.2),
+    )
     for ax, (source, title, color) in zip(axes, groups):
         group_rows = sorted(
             [row for row in rows if row.get("state_source") == source and is_open_loop_model_row(row)],
@@ -522,6 +557,10 @@ def plot_train_time_accuracy() -> None:
                 bbox={"boxstyle": "round,pad=0.08", "facecolor": "white", "edgecolor": "none", "alpha": 0.75},
             )
         group_rows = [row for row in group_rows if clean_method_name(row["method"], source) != "Nominal"]
+        group_rows, failed_rows = split_tradeoff_rows(group_rows)
+        add_failure_callout(ax, failed_rows, source)
+        if not group_rows:
+            continue
         x = [max(float(row["train_elapsed_s"]), 1e-3) for row in group_rows]
         y = [max(float(row["validation_score"]), 1e-4) for row in group_rows]
         sizes = [42.0 + 18.0 * min(float(row["rollout_elapsed_s"]), 12.0) for row in group_rows]
@@ -630,12 +669,17 @@ def plot_archived_train_time_accuracy(mode: str, rows: list[dict[str, str]]) -> 
         ("mocap", "Mocap-derived states", "#f58518"),
     ]
     fig, axes = plt.subplots(1, 2, figsize=(10.2, 4.8), sharey=True)
-    all_scores = [
+    passed_scores = [
         max(float(row["validation_score"]), 1e-4)
         for row in rows
-        if row.get("state_source") in {"direct", "mocap"} and is_open_loop_model_row(row)
+        if row.get("state_source") in {"direct", "mocap"}
+        and is_open_loop_model_row(row)
+        and float(row["validation_score"]) <= TRADEOFF_FAILURE_THRESHOLD
     ]
-    y_limits = (max(min(all_scores) * 0.45, 6e-3), max(all_scores) * 4.0) if all_scores else (1e-2, 1.0)
+    y_limits = (
+        max(min(passed_scores) * 0.45, 6e-3),
+        max(min(max(passed_scores) * 2.2, TRADEOFF_FAILURE_THRESHOLD * 1.1), 0.2),
+    ) if passed_scores else (1e-2, TRADEOFF_FAILURE_THRESHOLD * 1.1)
     for ax, (source, title, color) in zip(axes, groups):
         group_rows = sorted(
             [row for row in rows if row.get("state_source") == source and is_open_loop_model_row(row)],
@@ -660,6 +704,10 @@ def plot_archived_train_time_accuracy(mode: str, rows: list[dict[str, str]]) -> 
                 bbox={"boxstyle": "round,pad=0.08", "facecolor": "white", "edgecolor": "none", "alpha": 0.75},
             )
         group_rows = [row for row in group_rows if clean_method_name(row["method"], source) != "Nominal"]
+        group_rows, failed_rows = split_tradeoff_rows(group_rows)
+        add_failure_callout(ax, failed_rows, source)
+        if not group_rows:
+            continue
         x = [max(float(row["train_elapsed_s"]), 1e-3) for row in group_rows]
         y = [max(float(row["validation_score"]), 1e-4) for row in group_rows]
         sizes = [42.0 + 18.0 * min(float(row["rollout_elapsed_s"]), 12.0) for row in group_rows]

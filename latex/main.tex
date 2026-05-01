@@ -257,7 +257,7 @@ Two observation assumptions are evaluated. In the direct-state case, the method 
 \begin{figure}[hbt!]
     \centering
     \includesvg[width=0.95\linewidth]{generated_aircraft6dof_train_time_accuracy_tradeoff}
-    \caption{Training-time versus validation-error tradeoff for the 6-DOF benchmark. The red dashed horizontal line gives the attached-flow nominal baseline, which has no fitted training solve. Marker area increases with validation rollout time.}
+    \caption{Training-time versus validation-error tradeoff for the 6-DOF benchmark. Methods with mean-state NRMSE above 1.0 are treated as failed rollouts and summarized in the callout so the useful region remains visible. The red dashed horizontal line gives the attached-flow nominal baseline, which has no fitted training solve. Marker area increases with validation rollout time.}
     \label{fig:aircraft6dof_train_time_accuracy_tradeoff}
 \end{figure}
 }{}
@@ -1593,7 +1593,7 @@ Figure~\ref{fig:shared_train_time_accuracy_tradeoff} places the same results on 
 \begin{figure}[H]
     \centering
     \includesvg[width=0.98\linewidth]{generated_shared_train_time_accuracy_tradeoff}
-    \caption{Training-time versus validation-error tradeoff for the near-trim open-loop benchmark. The vertical axis is $J_{\mathrm{val}}$, the mean of the range-normalized RMSEs for $V,\alpha,\gamma$, and $q$ over all validation samples. Marker area increases with validation rollout time. The red dashed horizontal line gives the nominal-model baseline, which has no fitted training solve. Lower vertical position means lower trajectory error and therefore better validation performance.}
+    \caption{Training-time versus validation-error tradeoff for the near-trim open-loop benchmark. The vertical axis is $J_{\mathrm{val}}$, the mean of the range-normalized RMSEs for $V,\alpha,\gamma$, and $q$ over all validation samples. Methods with $J_{\mathrm{val}}>1.0$ are treated as failed rollouts and summarized in the callout so the useful region remains visible. Marker area increases with validation rollout time. The red dashed horizontal line gives the nominal-model baseline, which has no fitted training solve. Lower vertical position means lower trajectory error and therefore better validation performance.}
     \label{fig:shared_train_time_accuracy_tradeoff}
 \end{figure}
 
@@ -1601,7 +1601,7 @@ Figure~\ref{fig:shared_train_time_accuracy_tradeoff} places the same results on 
 \begin{figure}[H]
     \centering
     \includesvg[width=0.98\linewidth]{generated_aggressive_shared_train_time_accuracy_tradeoff}
-    \caption{Training-time versus validation-error tradeoff for the aggressive nonlinear benchmark. This case uses stratified initial conditions and larger elevator/throttle excitation to drive stall onset, drag rise, speed variation, pull-up, and recovery regimes. It should be interpreted as the primary nonlinear aerodynamic stress test, while Fig.~\ref{fig:shared_train_time_accuracy_tradeoff} is the local near-trim comparison.}
+    \caption{Training-time versus validation-error tradeoff for the aggressive nonlinear benchmark. Methods with $J_{\mathrm{val}}>1.0$ are summarized as failed rollouts in the callout. This case uses stratified initial conditions and larger elevator/throttle excitation to drive stall onset, drag rise, speed variation, pull-up, and recovery regimes. It should be interpreted as the primary nonlinear aerodynamic stress test, while Fig.~\ref{fig:shared_train_time_accuracy_tradeoff} is the local near-trim comparison.}
     \label{fig:aggressive_train_time_accuracy_tradeoff}
 \end{figure}
 }{}
@@ -1610,7 +1610,7 @@ Figure~\ref{fig:shared_train_time_accuracy_tradeoff} places the same results on 
 \begin{figure}[H]
     \centering
     \includesvg[width=0.98\linewidth]{generated_aggressive_safe_shared_train_time_accuracy_tradeoff}
-    \caption{Training-time versus validation-error tradeoff for the aggressive benchmark with the hidden SAFE-like controller enabled. The estimator receives the same external pilot-command channel, while the simulator is driven by an internally reshaped elevator command. This figure isolates the combined effect of nonlinear aerodynamics and unknown closed-loop input dynamics.}
+    \caption{Training-time versus validation-error tradeoff for the aggressive benchmark with the hidden SAFE-like controller enabled. Methods with $J_{\mathrm{val}}>1.0$ are summarized as failed rollouts in the callout. The estimator receives the same external pilot-command channel, while the simulator is driven by an internally reshaped elevator command. This figure isolates the combined effect of nonlinear aerodynamics and unknown closed-loop input dynamics.}
     \label{fig:aggressive_safe_train_time_accuracy_tradeoff}
 \end{figure}
 }{}

@@ -36,6 +36,7 @@ DEFAULT_RESULTS = METHODS_ROOT / "results"
 DEFAULT_FIG = METHODS_ROOT / "fig"
 DEFAULT_TABLES = METHODS_ROOT / "tables"
 DEFAULT_WORKERS = max(1, min(30, (os.cpu_count() or 2) - 2))
+TRADEOFF_FAILURE_THRESHOLD = 1.0
 
 
 @dataclass
@@ -1277,12 +1278,60 @@ def _source_rows(rows: list[dict[str, object]], source: str) -> list[dict[str, o
     return [row for row in rows if row["state_source"] == source and np.isfinite(float(row["validation_score"]))]
 
 
+def split_tradeoff_rows(rows: list[dict[str, object]], threshold: float = TRADEOFF_FAILURE_THRESHOLD) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    passed: list[dict[str, object]] = []
+    failed: list[dict[str, object]] = []
+    for row in rows:
+        if float(row["validation_score"]) > threshold:
+            failed.append(row)
+        else:
+            passed.append(row)
+    return passed, failed
+
+
+def tradeoff_label(method: object) -> str:
+    return str(method).replace("6DOF-", "").replace("Frequency-", "Freq-").replace("Model-Stitching", "Stitching")
+
+
+def add_failure_callout(ax, failed_rows: list[dict[str, object]], threshold: float = TRADEOFF_FAILURE_THRESHOLD) -> None:
+    if not failed_rows:
+        return
+    labels = [tradeoff_label(row["method"]) for row in sorted(failed_rows, key=lambda row: float(row["validation_score"]), reverse=True)]
+    shown = ", ".join(labels[:4])
+    if len(labels) > 4:
+        shown += f", +{len(labels) - 4}"
+    ax.text(
+        0.98,
+        0.98,
+        f"failed > {threshold:g}: {shown}",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=6.2,
+        color="0.25",
+        bbox={"boxstyle": "round,pad=0.22", "facecolor": "white", "edgecolor": "0.7", "alpha": 0.88},
+    )
+
+
 def plot_train_time_accuracy(rows: list[dict[str, object]], output: Path) -> None:
     groups = ["direct", "mocap"]
     colors = {"direct": "#4c78a8", "mocap": "#f58518"}
     fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.8), sharey=True)
+    passed_scores = [
+        max(float(row["validation_score"]), 1e-6)
+        for row in rows
+        if np.isfinite(float(row["validation_score"])) and float(row["validation_score"]) <= TRADEOFF_FAILURE_THRESHOLD
+    ]
+    y_limits = (
+        max(min(passed_scores) * 0.65, 5e-2),
+        max(min(max(passed_scores) * 2.2, TRADEOFF_FAILURE_THRESHOLD * 1.1), 0.25),
+    ) if passed_scores else (5e-2, TRADEOFF_FAILURE_THRESHOLD * 1.1)
     for ax, source in zip(axes, groups):
         source_rows = _source_rows(rows, source)
+        if not source_rows:
+            continue
+        source_rows, failed_rows = split_tradeoff_rows(source_rows)
+        add_failure_callout(ax, failed_rows)
         if not source_rows:
             continue
         train_times = np.array([max(float(row["train_elapsed_s"]), 1e-2) for row in source_rows])
@@ -1297,7 +1346,7 @@ def plot_train_time_accuracy(rows: list[dict[str, object]], output: Path) -> Non
         ax.scatter(train_times, scores, s=sizes, color=colors[source], edgecolor="black", linewidth=0.45, alpha=0.78, zorder=3)
         label_offsets = [(1.08, 1.10), (0.82, 1.18), (1.05, 0.75), (0.72, 0.82)]
         for index, row in enumerate(source_rows):
-            label = str(row["method"]).replace("6DOF-", "").replace("Frequency-", "Freq-").replace("Model-Stitching", "Stitching")
+            label = tradeoff_label(row["method"])
             if label == "Nominal":
                 continue
             dx, dy = label_offsets[index % len(label_offsets)]
@@ -1310,6 +1359,7 @@ def plot_train_time_accuracy(rows: list[dict[str, object]], output: Path) -> Non
             )
         ax.set_xscale("log")
         ax.set_yscale("log")
+        ax.set_ylim(*y_limits)
         ax.set_title(f"{source.capitalize()} benchmark")
         ax.set_xlabel("training / solve time [s]")
         ax.grid(True, which="both", alpha=0.25)
