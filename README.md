@@ -35,6 +35,28 @@ Method contributions are intentionally split from benchmark-result generation:
 
 See [docs/CONTRIBUTING_METHODS.md](docs/CONTRIBUTING_METHODS.md).
 
+## Generate 6DOF Data
+
+Generate the current 6DOF interface dataset:
+
+```bash
+./results.py simulate-6dof
+```
+
+Default output:
+
+```text
+methods/data/aircraft_6dof_mixed/
+  train.npz
+  validation.npz
+  metadata.json
+  summary.csv
+  preview_trials.png
+  preview_trials.svg
+```
+
+This dataset uses the current 6DOF smoke dynamics to stabilize the state/input/measurement interface. It is not yet the final nonlinear 6DOF aerodynamic benchmark.
+
 ## Local GPU Benchmark
 
 For a full local run on an NVIDIA workstation:

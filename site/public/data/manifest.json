@@ -3,8 +3,8 @@
     "maneuver_summary": "maneuver_summary.json",
     "method_results": "method_results.json"
   },
-  "generated_at": "2026-05-01T01:56:58.167814+00:00",
-  "git_sha": "a10bdd89900ff299fdf6cf53ad148973e52a9d9a",
+  "generated_at": "2026-05-01T02:04:12.600817+00:00",
+  "git_sha": "64ff32e4f260c47adb6f75a31239706ee475a8f8",
   "method_registry": [
     {
       "description": "Built-in method currently dispatched by methods/comparison_suite.py.",

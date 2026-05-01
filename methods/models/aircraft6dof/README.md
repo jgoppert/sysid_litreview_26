@@ -17,3 +17,11 @@ Run the smoke simulation from the repository root:
 ```bash
 PYTHONPATH=methods python3 -m models.aircraft6dof.smoke
 ```
+
+Generate the default 6DOF dataset:
+
+```bash
+./results.py simulate-6dof
+```
+
+The generated dataset is written to `methods/data/aircraft_6dof_mixed/` and is intentionally ignored by git.

@@ -23,12 +23,21 @@ STATE_NAMES = (
     "r",
 )
 INPUT_NAMES = ("throttle", "elevator", "aileron", "rudder")
+MIN_SPEED = 4.0
+MAX_SPEED = 42.0
 
 
 @dataclass(frozen=True)
 class Aircraft6DOFConfig:
     duration: float = 8.0
     dt: float = 0.02
+    train_trials: int = 32
+    validation_trials: int = 8
+    seed: int = 17
+    dataset_mode: str = "mixed"
+    measurement_noise: tuple[float, ...] = (0.03, 0.03, 0.03, 0.015, 0.015, 0.015, 0.015, 0.01, 0.01, 0.01, 0.02, 0.02, 0.02)
+    mocap_position_noise: float = 0.003
+    mocap_attitude_noise: float = 0.002
     mass: float = 1.2
     gravity: float = 9.81
     inertia: tuple[float, float, float] = (0.05, 0.08, 0.10)
@@ -51,6 +60,14 @@ def rotation_body_to_inertial(q_body_to_inertial: np.ndarray) -> np.ndarray:
             [2.0 * (q1 * q3 - q0 * q2), 2.0 * (q2 * q3 + q0 * q1), 1.0 - 2.0 * (q1**2 + q2**2)],
         ]
     )
+
+
+def euler_from_quaternion(q_body_to_inertial: np.ndarray) -> np.ndarray:
+    q0, q1, q2, q3 = normalize_quaternion(q_body_to_inertial)
+    roll = np.arctan2(2.0 * (q0 * q1 + q2 * q3), 1.0 - 2.0 * (q1**2 + q2**2))
+    pitch = np.arcsin(np.clip(2.0 * (q0 * q2 - q3 * q1), -1.0, 1.0))
+    yaw = np.arctan2(2.0 * (q0 * q3 + q1 * q2), 1.0 - 2.0 * (q2**2 + q3**2))
+    return np.array([roll, pitch, yaw])
 
 
 def quaternion_derivative(q_body_to_inertial: np.ndarray, rates: np.ndarray) -> np.ndarray:
@@ -110,6 +127,11 @@ def rk4_step(x: np.ndarray, u_cmd: np.ndarray, dt: float, config: Aircraft6DOFCo
     k4 = rhs(x + dt * k3, u_cmd, config)
     x_next = x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
     x_next[6:10] = normalize_quaternion(x_next[6:10])
+    speed = float(np.linalg.norm(x_next[3:6]))
+    if speed > MAX_SPEED:
+        x_next[3:6] *= MAX_SPEED / speed
+    elif 1e-9 < speed < MIN_SPEED:
+        x_next[3:6] *= MIN_SPEED / speed
     return x_next
 
 

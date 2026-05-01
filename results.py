@@ -1104,6 +1104,31 @@ def simulate(args: argparse.Namespace) -> None:
         run(command)
 
 
+def simulate_6dof(args: argparse.Namespace) -> None:
+    command = [
+        sys.executable,
+        "-m",
+        "models.aircraft6dof.generate_dataset",
+        "--output",
+        str(args.output),
+        "--train-trials",
+        str(args.train_trials),
+        "--validation-trials",
+        str(args.validation_trials),
+        "--duration",
+        str(args.duration),
+        "--dt",
+        str(args.dt),
+        "--seed",
+        str(args.seed),
+        "--dataset-mode",
+        args.dataset_mode,
+    ]
+    if args.no_plot:
+        command.append("--no-plot")
+    run(command, cwd=METHODS)
+
+
 def rates(_args: argparse.Namespace) -> None:
     run([sys.executable, str(METHODS / "observation_rate_study.py")])
 
@@ -1665,6 +1690,17 @@ def parse_args() -> argparse.Namespace:
     p_sim = sub.add_parser("simulate", help="generate the synthetic train/validation dataset")
     add_shared_options(p_sim)
     p_sim.set_defaults(func=simulate)
+
+    p_sim6 = sub.add_parser("simulate-6dof", help="generate the 6DOF train/validation dataset")
+    p_sim6.add_argument("--output", type=Path, default=METHODS / "data" / "aircraft_6dof_mixed")
+    p_sim6.add_argument("--train-trials", type=int, default=32)
+    p_sim6.add_argument("--validation-trials", type=int, default=8)
+    p_sim6.add_argument("--duration", type=float, default=12.0)
+    p_sim6.add_argument("--dt", type=float, default=0.02)
+    p_sim6.add_argument("--seed", type=int, default=17)
+    p_sim6.add_argument("--dataset-mode", choices=["mixed", "aggressive", "near_trim"], default="mixed")
+    p_sim6.add_argument("--no-plot", action="store_true")
+    p_sim6.set_defaults(func=simulate_6dof)
 
     p_rates = sub.add_parser("rates", help="run the observation-rate study")
     p_rates.set_defaults(func=rates)
