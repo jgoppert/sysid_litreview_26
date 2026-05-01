@@ -114,7 +114,7 @@ residual RMSE when applicable, and neural final loss when applicable.
 The validation trajectory score is a normalized aggregate error, so lower is
 better.
 
-The developing 6DOF comparison uses the top-level CLI:
+The 6DOF nonlinear aerodynamic comparison uses the top-level CLI:
 
 ```bash
 ./results.py all-6dof
@@ -125,7 +125,9 @@ This command generates `methods/data/aircraft_6dof_mixed/`, runs the current
 updates `methods/tables/aircraft6dof_method_comparison.tex`, creates the
 `methods/fig/aircraft6dof_*` figures, refreshes the GitHub Pages JSON, and
 copies LaTeX-ready assets into `latex/`. The generated dataset itself is ignored
-by git because it is large and reproducible.
+by git because it is large and reproducible. The dataset includes true and
+attached-flow nominal aerodynamic coefficients; `coeff_residual` is the hidden
+stall/nonlinear coefficient term.
 
 Expected outputs:
 

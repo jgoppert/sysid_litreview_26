@@ -12,7 +12,16 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .model import Aircraft6DOFConfig, INPUT_NAMES, STATE_NAMES, euler_from_quaternion, rk4_step
+from .model import (
+    COEFFICIENT_NAMES,
+    Aircraft6DOFConfig,
+    INPUT_NAMES,
+    STATE_NAMES,
+    aerodynamic_coefficients,
+    euler_from_quaternion,
+    quaternion_from_euler,
+    rk4_step,
+)
 
 
 METHODS_ROOT = Path(__file__).resolve().parents[2]
@@ -27,45 +36,45 @@ def _time(config: Aircraft6DOFConfig) -> np.ndarray:
 
 def _initial_state(rng: np.random.Generator, config: Aircraft6DOFConfig, aggressive: bool) -> np.ndarray:
     x0 = np.zeros(len(STATE_NAMES))
-    speed_spread = 2.2 if aggressive else 0.9
+    speed_spread = 3.0 if aggressive else 0.9
     x0[3] = config.wing_speed + rng.normal(0.0, speed_spread)
-    x0[4] = rng.normal(0.0, 0.25 if aggressive else 0.08)
-    x0[5] = rng.normal(0.0, 0.35 if aggressive else 0.10)
-    euler0 = rng.normal(0.0, [0.18, 0.14, 0.35] if aggressive else [0.04, 0.03, 0.08])
-    cr, sr = np.cos(0.5 * euler0[0]), np.sin(0.5 * euler0[0])
-    cp, sp = np.cos(0.5 * euler0[1]), np.sin(0.5 * euler0[1])
-    cy, sy = np.cos(0.5 * euler0[2]), np.sin(0.5 * euler0[2])
-    x0[6:10] = np.array(
-        [
-            cr * cp * cy + sr * sp * sy,
-            sr * cp * cy - cr * sp * sy,
-            cr * sp * cy + sr * cp * sy,
-            cr * cp * sy - sr * sp * cy,
-        ]
-    )
-    x0[10:13] = rng.normal(0.0, [0.25, 0.20, 0.22] if aggressive else [0.06, 0.05, 0.05])
+    alpha0 = rng.normal(np.deg2rad(4.0), np.deg2rad(9.0 if aggressive else 2.0))
+    beta0 = rng.normal(0.0, np.deg2rad(7.0 if aggressive else 1.5))
+    x0[4] = x0[3] * np.tan(beta0)
+    x0[5] = x0[3] * np.tan(alpha0)
+    euler0 = rng.normal(0.0, [0.35, 0.24, 0.45] if aggressive else [0.04, 0.03, 0.08])
+    x0[6:10] = quaternion_from_euler(euler0)
+    x0[10:13] = rng.normal(0.0, [0.55, 0.36, 0.42] if aggressive else [0.06, 0.05, 0.05])
     return x0
 
 
 def _command(t: np.ndarray, rng: np.random.Generator, mode: str) -> np.ndarray:
     aggressive = mode in {"mixed", "aggressive"}
-    amp = np.array([0.15, 0.22, 0.26, 0.18]) if aggressive else np.array([0.06, 0.07, 0.08, 0.05])
-    bias = np.array([0.56, 0.0, 0.0, 0.0])
-    freq = rng.uniform([0.18, 0.35, 0.25, 0.30], [0.75, 1.40, 1.20, 1.30])
+    amp = np.array([0.22, 0.44, 0.48, 0.36]) if aggressive else np.array([0.06, 0.07, 0.08, 0.05])
+    bias = np.array([0.62, 0.0, 0.0, 0.0])
+    freq = rng.uniform([0.16, 0.30, 0.25, 0.30], [0.65, 1.10, 1.05, 1.05])
     phase = rng.uniform(0.0, 2.0 * np.pi, size=4)
     u = np.zeros((len(t), len(INPUT_NAMES)))
     for index in range(4):
         u[:, index] = bias[index] + amp[index] * np.sin(freq[index] * t + phase[index])
         u[:, index] += 0.35 * amp[index] * np.sin(2.3 * freq[index] * t + 0.7 * phase[index])
     if aggressive:
-        for center in rng.uniform(0.15 * t[-1], 0.85 * t[-1], size=3):
-            width = rng.uniform(0.35, 0.85)
+        for center in rng.uniform(0.10 * t[-1], 0.90 * t[-1], size=5):
+            width = rng.uniform(0.45, 1.20)
             pulse = np.exp(-0.5 * ((t - center) / width) ** 2)
-            u[:, 1] += rng.uniform(-0.18, 0.18) * pulse
-            u[:, 2] += rng.uniform(-0.20, 0.20) * pulse
-            u[:, 3] += rng.uniform(-0.14, 0.14) * pulse
-    lower = np.array([0.05, -0.45, -0.55, -0.45])
-    upper = np.array([0.95, 0.45, 0.55, 0.45])
+            u[:, 0] += rng.uniform(-0.22, 0.18) * pulse
+            u[:, 1] += rng.uniform(-0.42, 0.42) * pulse
+            u[:, 2] += rng.uniform(-0.45, 0.45) * pulse
+            u[:, 3] += rng.uniform(-0.32, 0.32) * pulse
+        for center in np.linspace(0.20 * t[-1], 0.82 * t[-1], 4):
+            center += rng.uniform(-0.04 * t[-1], 0.04 * t[-1])
+            width = rng.uniform(0.55, 0.95)
+            pull = np.exp(-0.5 * ((t - center) / width) ** 2)
+            unload = np.exp(-0.5 * ((t - center - 1.15 * width) / (0.75 * width)) ** 2)
+            u[:, 1] += rng.choice([-1.0, 1.0]) * (0.48 * pull - 0.26 * unload)
+            u[:, 0] += 0.18 * pull - 0.12 * unload
+    lower = np.array([0.02, -0.70, -0.80, -0.65])
+    upper = np.array([1.00, 0.70, 0.80, 0.65])
     return np.clip(u, lower, upper)
 
 
@@ -98,6 +107,8 @@ def _simulate_trial(rng: np.random.Generator, config: Aircraft6DOFConfig, split:
     mocap_meas[:, 3:7] += rng.normal(0.0, config.mocap_attitude_noise, size=mocap_meas[:, 3:7].shape)
     mocap_meas[:, 3:7] /= np.maximum(np.linalg.norm(mocap_meas[:, 3:7], axis=1, keepdims=True), 1e-12)
     euler_true = np.asarray([euler_from_quaternion(q) for q in x[:, 6:10]])
+    coeff_true = np.asarray([aerodynamic_coefficients(xk, uk, config, nonlinear=True) for xk, uk in zip(x, u_act)])
+    coeff_nominal = np.asarray([aerodynamic_coefficients(xk, uk, config, nonlinear=False) for xk, uk in zip(x, u_act)])
     return {
         "t": t,
         "x_true": x,
@@ -108,17 +119,21 @@ def _simulate_trial(rng: np.random.Generator, config: Aircraft6DOFConfig, split:
         "u_cmd": u_cmd,
         "u_act": u_act,
         "x0": x[0],
+        "coeff_true": coeff_true,
+        "coeff_nominal": coeff_nominal,
+        "coeff_residual": coeff_true - coeff_nominal,
     }
 
 
 def _stack(trials: list[dict[str, np.ndarray]]) -> dict[str, np.ndarray]:
     data = {"t": trials[0]["t"]}
-    for key in ["x_true", "y_meas", "mocap_true", "mocap_meas", "euler_true", "u_cmd", "u_act", "x0"]:
+    for key in ["x_true", "y_meas", "mocap_true", "mocap_meas", "euler_true", "u_cmd", "u_act", "x0", "coeff_true", "coeff_nominal", "coeff_residual"]:
         data[key] = np.asarray([trial[key] for trial in trials])
     data["state_names"] = np.asarray(STATE_NAMES)
     data["input_names"] = np.asarray(INPUT_NAMES)
     data["mocap_names"] = np.asarray(MOCAP_NAMES)
     data["euler_names"] = np.asarray(EULER_NAMES)
+    data["coefficient_names"] = np.asarray(COEFFICIENT_NAMES)
     return data
 
 
@@ -134,6 +149,9 @@ def _summary_rows(split: str, data: dict[str, np.ndarray]) -> list[dict[str, flo
         "p_rad_s": data["x_true"][..., 10],
         "q_rad_s": data["x_true"][..., 11],
         "r_rad_s": data["x_true"][..., 12],
+        "alpha_deg": np.rad2deg(data["coeff_true"][..., 6]),
+        "beta_deg": np.rad2deg(data["coeff_true"][..., 7]),
+        "stall_gate": data["coeff_true"][..., 8],
         "x_n": data["x_true"][..., 0],
         "y_e": data["x_true"][..., 1],
         "z_d": data["x_true"][..., 2],
@@ -155,7 +173,7 @@ def _summary_rows(split: str, data: dict[str, np.ndarray]) -> list[dict[str, flo
 def _write_summary(path: Path, train_data: dict[str, np.ndarray], validation_data: dict[str, np.ndarray]) -> None:
     rows = _summary_rows("train", train_data) + _summary_rows("validation", validation_data)
     with path.open("w", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=["split", "signal", "min", "mean", "max", "std"])
+        writer = csv.DictWriter(stream, fieldnames=["split", "signal", "min", "mean", "max", "std"], lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -167,19 +185,18 @@ def _write_preview(path: Path, train: dict[str, np.ndarray], validation: dict[st
         t = data["t"]
         for trial in range(n_trials):
             x = data["x_true"][trial]
-            euler = np.rad2deg(data["euler_true"][trial])
             axes[0, col].plot(x[:, 0], -x[:, 2], linewidth=0.8, alpha=0.75)
             axes[1, col].plot(t, np.linalg.norm(x[:, 3:6], axis=1), linewidth=0.8, alpha=0.75)
-            axes[2, col].plot(t, euler[:, 0], linewidth=0.8, alpha=0.75)
-            axes[3, col].plot(t, euler[:, 1], linewidth=0.8, alpha=0.75)
+            axes[2, col].plot(t, np.rad2deg(data["coeff_true"][trial, :, 6]), linewidth=0.8, alpha=0.75)
+            axes[3, col].plot(t, data["coeff_true"][trial, :, 8], linewidth=0.8, alpha=0.75)
         axes[0, col].set_title(label)
         axes[0, col].set_xlabel("x north [m]")
         for row in range(1, 4):
             axes[row, col].set_xlabel("time [s]")
     axes[0, 0].set_ylabel("altitude proxy -z_d [m]")
     axes[1, 0].set_ylabel("speed [m/s]")
-    axes[2, 0].set_ylabel("roll [deg]")
-    axes[3, 0].set_ylabel("pitch [deg]")
+    axes[2, 0].set_ylabel("alpha [deg]")
+    axes[3, 0].set_ylabel("stall gate")
     for axis in axes.ravel():
         axis.grid(True, alpha=0.25)
     fig.savefig(path, dpi=180)
@@ -197,15 +214,17 @@ def write_dataset(output_dir: Path, config: Aircraft6DOFConfig, make_plot: bool 
     np.savez_compressed(output_dir / "train.npz", **train_data)
     np.savez_compressed(output_dir / "validation.npz", **validation_data)
     metadata = {
-        "description": "6DOF aircraft benchmark skeleton data with position, quaternion attitude, body velocity/rates, pilot commands, and mocap-style position/attitude measurements.",
+        "description": "Nonlinear 6DOF aircraft benchmark data with smooth stall aerodynamics, position, quaternion attitude, body velocity/rates, pilot commands, and mocap-style position/attitude measurements.",
         "config": asdict(config),
         "state_names": list(STATE_NAMES),
         "input_names": list(INPUT_NAMES),
         "mocap_names": list(MOCAP_NAMES),
         "euler_names": list(EULER_NAMES),
+        "coefficient_names": list(COEFFICIENT_NAMES),
         "files": {"train": "train.npz", "validation": "validation.npz"},
         "notes": [
-            "This is an interface-stabilization dataset using the current 6DOF smoke dynamics, not the final nonlinear aerodynamic 6DOF benchmark.",
+            "The truth model uses nonlinear 6DOF rigid-body dynamics, body-axis aerodynamic forces/moments, smooth lift rollover, post-stall drag rise, control-effectiveness loss, and nonlinear lateral-directional coupling.",
+            "coeff_nominal is the attached-flow nominal coefficient model; coeff_residual is coeff_true - coeff_nominal and contains the hidden nonlinear stall/residual term.",
             "u_cmd is the pilot command; u_act is the first-order actuator-realized command used by the simulator.",
             "mocap_meas contains position and quaternion attitude with measurement noise.",
             "y_meas is a noisy direct-state channel retained for oracle/debug comparisons.",

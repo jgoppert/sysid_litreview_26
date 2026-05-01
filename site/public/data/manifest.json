@@ -3,8 +3,8 @@
     "maneuver_summary": "maneuver_summary.json",
     "method_results": "method_results.json"
   },
-  "generated_at": "2026-05-01T02:43:45.304990+00:00",
-  "git_sha": "2d0b873d8c0c92537b538782c908a8cbdbaaf423",
+  "generated_at": "2026-05-01T03:11:56.252661+00:00",
+  "git_sha": "ae2952d4ee419d7aefd593e0f9fd1b2341989850",
   "method_registry": [
     {
       "description": "Built-in 6DOF baseline dispatched by methods/models/aircraft6dof/comparison_suite.py.",

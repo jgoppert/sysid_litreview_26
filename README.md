@@ -16,7 +16,7 @@ This verifies:
 - method plugin metadata can be discovered,
 - plugin smoke checks pass,
 - website JSON is regenerated,
-- the 6DOF model skeleton runs a deterministic smoke simulation.
+- the 6DOF nonlinear aerodynamic model runs a deterministic smoke simulation.
 
 Serve the benchmark website locally:
 
@@ -67,9 +67,10 @@ dataset is intentionally ignored by git; the committed benchmark artifacts live
 under `methods/results/`, `methods/tables/`, `methods/fig/`, and
 `site/public/data/`.
 
-The current 6DOF dynamics are still a compact interface benchmark. They
-stabilize the state, input, mocap-observation, method, website, and LaTeX paths
-before the final nonlinear 6DOF aerodynamic benchmark is added.
+The current 6DOF dynamics are a nonlinear small-aircraft benchmark with
+body-axis aerodynamic forces and moments, smooth stall onset, post-stall drag
+rise, control-effectiveness loss, actuator lag, direct-state measurements, and
+mocap-style position/quaternion measurements.
 
 ## Local GPU Benchmark
 

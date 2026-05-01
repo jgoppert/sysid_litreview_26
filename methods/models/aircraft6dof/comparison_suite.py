@@ -19,8 +19,8 @@ from .model import (
     MIN_SPEED,
     STATE_NAMES,
     Aircraft6DOFConfig,
+    nominal_rk4_step,
     normalize_quaternion,
-    rk4_step,
     rotation_body_to_inertial,
 )
 
@@ -203,7 +203,7 @@ def nominal_rollout(initial: np.ndarray, u: np.ndarray, t: np.ndarray, config: A
     for trial in range(u.shape[0]):
         pred[trial, 0] = normalize_state(pred[trial, 0])
         for index in range(len(t) - 1):
-            pred[trial, index + 1] = rk4_step(pred[trial, index], u[trial, index], dt, cfg)
+            pred[trial, index + 1] = nominal_rk4_step(pred[trial, index], u[trial, index], dt, cfg)
     return pred
 
 
@@ -226,7 +226,7 @@ def residual_rollout(initial: np.ndarray, u: np.ndarray, t: np.ndarray, weights:
     for trial in range(u.shape[0]):
         pred[trial, 0] = normalize_state(pred[trial, 0])
         for index in range(len(t) - 1):
-            base = rk4_step(pred[trial, index], u[trial, index], dt, cfg)
+            base = nominal_rk4_step(pred[trial, index], u[trial, index], dt, cfg)
             phi = np.concatenate((pred[trial, index], u[trial, index], [1.0]))
             pred[trial, index + 1] = normalize_state(base + phi @ weights)
     return pred
@@ -299,7 +299,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     results.append(
         score_state_method(
             "6DOF-Nominal",
-            "Known smoke-model rollout using pilot commands and no fitted actuator correction.",
+            "Attached-flow nominal 6DOF rollout using pilot commands and no fitted stall correction.",
             "numpy-rk4",
             state_source,
             0.0,
@@ -309,7 +309,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
             0,
             pred,
             validation,
-            "No-fit baseline; mismatch is mostly actuator lag and mocap-derived initialization error.",
+            "No-fit baseline; mismatch includes actuator lag, hidden stall/nonlinear aerodynamics, and mocap-derived initialization error.",
         )
     )
 
@@ -343,7 +343,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
     nominal_next = np.zeros_like(train_x[:, 1:, :])
     for trial in range(train_x.shape[0]):
         for index in range(train_x.shape[1] - 1):
-            nominal_next[trial, index] = rk4_step(train_x[trial, index], train.u_cmd[trial, index], train.dt, config)
+            nominal_next[trial, index] = nominal_rk4_step(train_x[trial, index], train.u_cmd[trial, index], train.dt, config)
     residual = train_x[:, 1:, :] - nominal_next
     weights = ridge_fit(design_matrix(train_x[:, :-1, :], train.u_cmd[:, :-1, :]), residual, ridge)
     train_elapsed = time.perf_counter() - start
@@ -364,7 +364,7 @@ def run_methods(train: Split6DOF, validation: Split6DOF, state_source: str, ridg
             int(weights.size),
             pred,
             validation,
-            "Residual corrects the practical gap between pilot command and actuator-realized simulator input.",
+            "Residual corrects actuator lag and hidden nonlinear stall/aerodynamic effects around the attached-flow model.",
         )
     )
 

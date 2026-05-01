@@ -1,8 +1,8 @@
 # Aircraft 6DOF Model
 
-This package is the starting point for the coupled aircraft benchmark family.
+This package contains the coupled 6DOF aircraft benchmark family.
 
-The current implementation is a deterministic smoke model with:
+The current implementation is a deterministic nonlinear small-aircraft model with:
 
 - inertial position,
 - body velocity,
@@ -10,10 +10,12 @@ The current implementation is a deterministic smoke model with:
 - body angular rates,
 - throttle, elevator, aileron, and rudder commands.
 
-It is intentionally simple. Its purpose is to stabilize the 6DOF state, input,
-simulation, mocap observation, method-comparison, website, and LaTeX interfaces
-before adding nonlinear aerodynamics, stall behavior, and hidden stabilization
-loops.
+The truth model uses body-axis aerodynamic force and moment coefficients,
+smooth lift rollover, post-stall drag rise, control-effectiveness loss, nonlinear
+lateral-directional coupling, first-order actuator lag, noisy direct-state
+measurements, and mocap-style position/quaternion measurements. The comparison
+suite also exposes an attached-flow nominal model so residual methods can be
+tested against hidden nonlinear stall effects.
 
 Run the smoke simulation from the repository root:
 
@@ -46,7 +48,7 @@ ignored by git.
 
 Current baseline methods:
 
-- `6DOF-Nominal`: no-fit RK4 rollout with the supplied pilot-command history.
+- `6DOF-Nominal`: attached-flow RK4 rollout with the supplied pilot-command history.
 - `6DOF-LinearSS`: global affine discrete state-space ridge fit.
-- `6DOF-RidgeResidual`: nominal RK4 rollout plus a ridge one-step residual.
+- `6DOF-RidgeResidual`: attached-flow RK4 rollout plus a ridge one-step residual.
 - `6DOF-MocapOutputARX`: mocap position/quaternion output predictor.

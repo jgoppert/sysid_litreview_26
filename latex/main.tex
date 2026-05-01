@@ -91,7 +91,7 @@ This reference documents the benchmark implemented in the \texttt{system\_identi
 The current repository has three main products:
 \begin{enumerate}
     \item a reproducible 3-DOF longitudinal aircraft benchmark with direct-state and motion-capture-style observation channels;
-    \item a developing 6-DOF aircraft dataset interface used to stabilize future coupled-dynamics benchmarks;
+    \item a nonlinear 6-DOF aircraft dataset with stall/residual aerodynamics for future coupled-dynamics benchmarks;
     \item a static benchmark website data export and method-plugin interface for future contributed methods.
 \end{enumerate}
 
@@ -164,7 +164,7 @@ The UDE rows retain the known longitudinal dynamics and learn residual terms. Th
 \subsection{6-DOF Baseline Methods}
 
 \paragraph{6DOF-Nominal.}
-The 6-DOF nominal row propagates the repository's quaternion rigid-body smoke model with the supplied pilot-command history. It has no fitted parameters and is used as the no-fit baseline for the developing coupled-dynamics benchmark.
+The 6-DOF nominal row propagates the repository's attached-flow quaternion rigid-body model with the supplied pilot-command history. It has no fitted parameters and is used as the no-fit baseline against the hidden nonlinear stall/residual aerodynamic truth model.
 
 \paragraph{6DOF-LinearSS.}
 The 6-DOF linear state-space row fits an affine one-step predictor,
@@ -179,7 +179,7 @@ The 6-DOF residual row first propagates the nominal RK4 model and then adds a ri
 \mathbf{x}_{k+1}=\Phi_{\mathrm{nom}}(\mathbf{x}_k,\mathbf{u}_{\mathrm{cmd},k})
 +W^T[\mathbf{x}_k^T,\mathbf{u}_{\mathrm{cmd},k}^T,1]^T.
 \]
-This tests the same grey-box idea used in UDE-style methods, but with a linear residual so that the initial 6-DOF benchmark remains fast and deterministic.
+This tests the same grey-box idea used in UDE-style methods, but with a linear residual so that the 6-DOF benchmark remains fast and deterministic. The residual absorbs actuator lag and the hidden difference between the attached-flow nominal model and the stalled nonlinear truth model.
 
 \paragraph{6DOF-MocapOutputARX.}
 The mocap-output 6-DOF row fits an affine one-step predictor on measured position and quaternion attitude. It does not predict body velocity or angular rate, so its validation score is a mocap-output NRMSE rather than a full-state NRMSE.
@@ -196,11 +196,11 @@ and currently writes \texttt{methods/data/aircraft\_6dof\_mixed/}. The full loca
 \begin{verbatim}
 ./results.py all-6dof
 \end{verbatim}
-which generates train/validation data, runs the implemented 6-DOF baseline methods, exports website data, and refreshes LaTeX-ready artifacts. The 6-DOF dataset contains inertial position, body velocity, quaternion attitude, body angular rates, pilot commands, actuator-realized commands, noisy direct-state measurements, and mocap-style position/quaternion measurements.
+which generates train/validation data, runs the implemented 6-DOF baseline methods, exports website data, and refreshes LaTeX-ready artifacts. The 6-DOF dataset contains inertial position, body velocity, quaternion attitude, body angular rates, pilot commands, actuator-realized commands, noisy direct-state measurements, mocap-style position/quaternion measurements, true aerodynamic coefficients, attached-flow nominal coefficients, and coefficient residual labels.
 
 \section{6-DOF Coupled-Dynamics Benchmark}
 
-The 6-DOF benchmark is the repository's developing coupled-dynamics extension. The state is
+The 6-DOF benchmark is the repository's nonlinear coupled-dynamics extension. The state is
 \[
 \mathbf{x}=
 \begin{bmatrix}
@@ -216,7 +216,31 @@ where $(x_n,y_e,z_d)$ is inertial position, $(u,v,w)$ is body velocity, $(q_w,q_
 \]
 The simulator applies first-order actuator lag to obtain $\mathbf{u}_{\mathrm{act}}$, but the identification methods are supplied $\mathbf{u}_{\mathrm{cmd}}$ to preserve the practical pilot-command setting.
 
-The current dynamics are intentionally compact so the benchmark interface can stabilize before adding a high-fidelity 6-DOF aerodynamic model. Body translational dynamics use a damped velocity model with gravity resolved into the body frame and command-dependent axial, side, and normal accelerations. Rotational dynamics use diagonal inertia, command moments, and rate damping. The quaternion is renormalized after every RK4 step. This model is not intended to replace the 3-DOF nonlinear aerodynamic benchmark; it provides a complete data and method path for future 6-DOF methods.
+The rigid-body equations use body-axis velocity and a body-to-inertial quaternion:
+\[
+\dot{\mathbf{p}}_n = R_{b}^{n}(\mathbf{q})\mathbf{v}_b,\qquad
+\dot{\mathbf{v}}_b = \frac{\mathbf{F}_b}{m} + R_{n}^{b}(\mathbf{q})\begin{bmatrix}0&0&g\end{bmatrix}^T - \boldsymbol{\omega}_b\times\mathbf{v}_b,
+\]
+\[
+\dot{\mathbf{q}} = \frac{1}{2}\Omega(\boldsymbol{\omega}_b)\mathbf{q},\qquad
+J\dot{\boldsymbol{\omega}}_b = \mathbf{M}_b - \boldsymbol{\omega}_b\times J\boldsymbol{\omega}_b.
+\]
+The simulator renormalizes the quaternion after every RK4 step.
+
+The truth model computes airdata from body velocity,
+\[
+V=\|\mathbf{v}_b\|,\qquad \alpha=\tan^{-1}(w/u),\qquad \beta=\sin^{-1}(v/V),
+\]
+and dynamic pressure $\bar{q}=\frac{1}{2}\rho V^2$. Attached-flow lift, drag, pitching moment, side-force, roll-moment, and yaw-moment coefficients are evaluated from $\alpha,\beta$, nondimensional rates, and control deflections. A smooth stall gate
+\[
+\sigma(\alpha)=\left(1+\exp\left[-\frac{|\alpha|-\alpha_{\mathrm{stall}}}{\Delta\alpha_{\mathrm{stall}}}\right]\right)^{-1}
+\]
+blends the attached lift curve into a finite post-stall lift model, adds post-stall drag rise, applies pitch-break moment, reduces control effectiveness, and adds nonlinear lateral-directional coupling. Body aerodynamic forces are then
+\[
+\begin{bmatrix}F_X&F_Y&F_Z\end{bmatrix}^T
+= \bar{q}S\begin{bmatrix}C_X&C_Y&C_Z\end{bmatrix}^T,
+\]
+with $C_X=-C_D\cos\alpha+C_L\sin\alpha$ and $C_Z=-C_D\sin\alpha-C_L\cos\alpha$. Moments are scaled by $\bar{q}S[bC_l,cC_m,bC_n]^T$. Propeller thrust acts along body $x$ and contributes a small pitching moment. The dataset stores both the truth coefficients and an attached-flow nominal coefficient set; their difference is the hidden nonlinear aerodynamic residual.
 
 Two observation assumptions are evaluated. In the direct-state case, the method receives noisy measurements of all 13 states during training and the initial measured state during validation. In the mocap-derived case, the method receives position and quaternion attitude. Body velocity is reconstructed by differentiating mocap position and rotating the result into the body frame, while angular rate is reconstructed by differentiating the quaternion and solving the local quaternion-rate equation. These reconstructed velocity and rate channels are intentionally noisier than the direct-state channel.
 
@@ -1956,7 +1980,7 @@ initial-condition and maneuver variation reveal when global linearity is no
 longer adequate.
 
 \section{Repository Roadmap}
-The immediate roadmap is repository-driven rather than submission-driven. The first priority is to keep the 3-DOF benchmark reproducible: generated datasets, figures, tables, website artifacts, and this reference document should be regenerated from the same command-line entry points. The second priority is to mature the developing 6-DOF dataset interface into a full nonlinear benchmark with coupled lateral-directional and longitudinal dynamics. The third priority is to stabilize the method-plugin interface so external contributors can add methods without editing the core comparison harness.
+The immediate roadmap is repository-driven rather than submission-driven. The first priority is to keep the 3-DOF benchmark reproducible: generated datasets, figures, tables, website artifacts, and this reference document should be regenerated from the same command-line entry points. The second priority is to mature the 6-DOF nonlinear benchmark methods beyond the initial attached-flow, linear, residual, and mocap-output baselines. A useful future extension is a separate F-16 model family based on the Stevens--Lewis table-lookup aerodynamics, which would test high-performance aircraft identification without replacing the present small-RC, mocap-motivated benchmark. The third priority is to stabilize the method-plugin interface so external contributors can add methods without editing the core comparison harness.
 
 Future methods should be added only when the repository contains executable code, benchmark metadata, and validation results for the new row. Candidate additions include input-output nonlinear predictors, richer local/LPV model stitching, Bayesian uncertainty-aware variants of the existing grey-box methods, and high-fidelity aerodynamic surrogate closures. Until those implementations exist in the repository, this reference limits detailed method descriptions to the rows already represented by code and generated results.
 

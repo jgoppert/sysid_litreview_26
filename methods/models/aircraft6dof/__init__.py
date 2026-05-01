@@ -1,4 +1,4 @@
-"""Six-degree-of-freedom aircraft benchmark model skeleton."""
+"""Six-degree-of-freedom nonlinear aircraft benchmark model."""
 
 from .model import Aircraft6DOFConfig, INPUT_NAMES, STATE_NAMES, simulate_smoke
 
