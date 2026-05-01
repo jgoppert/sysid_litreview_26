@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .schema import METHOD_RESULT_FIELDS, MODEL_FAMILY_3DOF, SCHEMA_VERSION
+from .registry import all_method_metadata, metadata_to_dict
 
 
 NUMERIC_FIELDS = {
@@ -144,11 +145,13 @@ def export_web_data(
         }
         for scenario in dataset_modes
     ]
+    method_registry = [metadata_to_dict(method) for method in all_method_metadata(root / "methods" / "plugins")]
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at,
         "git_sha": git_sha,
         "model_families": [MODEL_FAMILY_3DOF],
+        "method_registry": method_registry,
         "files": {
             "method_results": "method_results.json",
             "maneuver_summary": "maneuver_summary.json",
