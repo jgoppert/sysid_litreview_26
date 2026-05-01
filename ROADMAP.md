@@ -26,7 +26,7 @@ system_identification/
     plugins/
       <method_name>/
         method.py
-        method.yaml
+        method.json
         README.md
         test_smoke.py
     results/
