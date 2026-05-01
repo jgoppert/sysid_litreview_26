@@ -41,17 +41,26 @@ Run the implemented 6DOF baseline methods on an existing dataset:
 ./results.py suite-6dof
 ```
 
+By default this runs the baseline methods on the standard 6DOF dataset family
+and aggregates the figures/tables across `open_loop`, `sine_sweep`,
+`aggressive`, and `trim_grid`. To run only one dataset, pass it as the sole
+mode, for example:
+
+```bash
+./results.py suite-6dof --dataset-modes aggressive
+```
+
 Run the full local 6DOF workflow:
 
 ```bash
 ./results.py all-6dof
 ```
 
-The full workflow generates data, runs the baseline comparison, exports
-GitHub Pages JSON, and refreshes LaTeX-ready tables and figures. The generated
-aggressive dataset is written to `methods/data/aircraft_6dof_aggressive/` by
-default and is intentionally ignored by git. The available 6DOF dataset modes
-are:
+The full workflow generates the standard dataset family, runs the baseline
+comparison on each dataset, exports GitHub Pages JSON, and refreshes
+LaTeX-ready tables and figures. Generated datasets are written to
+`methods/data/aircraft_6dof_*` and are intentionally ignored by git. The
+available 6DOF dataset modes are:
 
 - `open_loop`: small multi-sine pilot inputs around near-trim conditions.
 - `sine_sweep`: chirp-like elevator, throttle, aileron, and rudder excitation.

@@ -1,5 +1,10 @@
 {
-  "dataset": "/home/jgoppert/git/system_identification/methods/data/aircraft_6dof_aggressive",
+  "datasets": [
+    "/home/jgoppert/git/system_identification/methods/data/aircraft_6dof_open_loop",
+    "/home/jgoppert/git/system_identification/methods/data/aircraft_6dof_sine_sweep",
+    "/home/jgoppert/git/system_identification/methods/data/aircraft_6dof_aggressive",
+    "/home/jgoppert/git/system_identification/methods/data/aircraft_6dof_trim_grid"
+  ],
   "methods": [
     "6DOF-EKF-ParamID",
     "6DOF-EquationError-LS",
@@ -24,7 +29,13 @@
   ],
   "metric": "Validation score is full-state mean NRMSE for state predictors and mocap-output NRMSE for 6DOF-OEM-MocapOutput.",
   "model_family": "aircraft6dof",
-  "result_rows": 39,
+  "result_rows": 156,
+  "scenarios": [
+    "aircraft_6dof_aggressive",
+    "aircraft_6dof_open_loop",
+    "aircraft_6dof_sine_sweep",
+    "aircraft_6dof_trim_grid"
+  ],
   "state_sources": [
     "direct",
     "mocap"

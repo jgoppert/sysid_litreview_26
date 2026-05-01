@@ -120,8 +120,9 @@ The 6DOF nonlinear aerodynamic comparison uses the top-level CLI:
 ./results.py all-6dof
 ```
 
-This command generates `methods/data/aircraft_6dof_aggressive/`, runs the current
-6DOF baselines, writes `methods/results/aircraft6dof_method_comparison.csv`,
+This command generates the standard `methods/data/aircraft_6dof_*` datasets,
+runs the current 6DOF baselines on each dataset, writes
+`methods/results/aircraft6dof_method_comparison.csv`,
 updates `methods/tables/aircraft6dof_method_comparison.tex`, creates the
 `methods/fig/aircraft6dof_*` figures, refreshes the GitHub Pages JSON, and
 copies LaTeX-ready assets into `latex/`. The generated dataset itself is ignored

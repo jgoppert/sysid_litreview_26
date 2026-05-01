@@ -1207,12 +1207,11 @@ def simulate_6dof(args: argparse.Namespace) -> None:
 
 
 def suite_6dof(args: argparse.Namespace) -> None:
+    dataset_modes = list(getattr(args, "dataset_modes", None) or [])
     command = [
         sys.executable,
         "-m",
         "models.aircraft6dof.comparison_suite",
-        "--dataset",
-        str(args.dataset),
         "--state-source",
         args.state_source,
         "--ridge",
@@ -1226,6 +1225,11 @@ def suite_6dof(args: argparse.Namespace) -> None:
         "--table-dir",
         str(METHODS / "tables"),
     ]
+    if dataset_modes:
+        command.append("--datasets")
+        command.extend(str(SIX_DOF_DATASET_OUTPUTS[mode]) for mode in dataset_modes)
+    else:
+        command.extend(["--dataset", str(args.dataset)])
     if args.no_plot:
         command.append("--no-plot")
     run(command, cwd=METHODS)
@@ -1233,10 +1237,12 @@ def suite_6dof(args: argparse.Namespace) -> None:
 
 def all_6dof(args: argparse.Namespace) -> None:
     simulate_6dof(args)
+    dataset_modes = list(getattr(args, "dataset_modes", None) or [])
     dataset = args.output if getattr(args, "output", None) is not None else SIX_DOF_DATASET_OUTPUTS[args.dataset_mode]
     suite_6dof(
         argparse.Namespace(
             dataset=dataset,
+            dataset_modes=dataset_modes,
             state_source=args.state_source,
             ridge=args.ridge,
             workers=args.workers,
@@ -1826,6 +1832,7 @@ def parse_args() -> argparse.Namespace:
 
     p_suite6 = sub.add_parser("suite-6dof", help="run baseline methods on the 6DOF train/validation dataset")
     p_suite6.add_argument("--dataset", type=Path, default=SIX_DOF_DATASET_OUTPUTS["aggressive"])
+    p_suite6.add_argument("--dataset-modes", nargs="+", choices=list(SIX_DOF_DATASET_MODES), default=list(SIX_DOF_DATASET_MODES), help="standard 6DOF datasets to aggregate; use --dataset-modes with no value disabled by passing --dataset through Python API only")
     p_suite6.add_argument("--state-source", choices=["direct", "mocap", "both"], default="both")
     p_suite6.add_argument("--ridge", type=float, default=1e-5)
     p_suite6.add_argument("--workers", type=int, default=max(1, min(30, (os.cpu_count() or 2) - 2)))
@@ -1840,6 +1847,7 @@ def parse_args() -> argparse.Namespace:
     p_all6.add_argument("--dt", type=float, default=0.02)
     p_all6.add_argument("--seed", type=int, default=17)
     p_all6.add_argument("--dataset-mode", choices=list(SIX_DOF_DATASET_MODES), default="aggressive")
+    p_all6.add_argument("--dataset-modes", nargs="+", choices=list(SIX_DOF_DATASET_MODES), default=list(SIX_DOF_DATASET_MODES))
     p_all6.add_argument("--state-source", choices=["direct", "mocap", "both"], default="both")
     p_all6.add_argument("--ridge", type=float, default=1e-5)
     p_all6.add_argument("--workers", type=int, default=max(1, min(30, (os.cpu_count() or 2) - 2)))

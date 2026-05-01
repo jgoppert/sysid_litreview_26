@@ -3,8 +3,8 @@
     "maneuver_summary": "maneuver_summary.json",
     "method_results": "method_results.json"
   },
-  "generated_at": "2026-05-01T05:00:08.654977+00:00",
-  "git_sha": "6fda74ec80aa97ccc787c06cf321290826c14961",
+  "generated_at": "2026-05-01T05:08:32.885217+00:00",
+  "git_sha": "30d2d3b9fc22204903fa00e8dd2eb511440c795b",
   "method_registry": [
     {
       "description": "Built-in 6DOF baseline dispatched by methods/models/aircraft6dof/comparison_suite.py.",
@@ -811,13 +811,13 @@
     },
     {
       "id": "aircraft_6dof_open_loop",
-      "method_result_count": 0,
+      "method_result_count": 39,
       "model_family": "aircraft6dof",
       "title": "6-DOF open-loop maneuver"
     },
     {
       "id": "aircraft_6dof_sine_sweep",
-      "method_result_count": 0,
+      "method_result_count": 39,
       "model_family": "aircraft6dof",
       "title": "6-DOF sine-sweep maneuver"
     },
@@ -829,7 +829,7 @@
     },
     {
       "id": "aircraft_6dof_trim_grid",
-      "method_result_count": 0,
+      "method_result_count": 39,
       "model_family": "aircraft6dof",
       "title": "6-DOF local trim-grid small-deviation maneuver"
     }
