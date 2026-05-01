@@ -1,0 +1,67 @@
+{
+  "files": {
+    "maneuver_summary": "maneuver_summary.json",
+    "method_results": "method_results.json"
+  },
+  "generated_at": "2026-05-01T01:37:08.934244+00:00",
+  "git_sha": "8f5f12d97dcde00ee4457a6009eb9be98eb2471c",
+  "metric_definitions": {
+    "rollout_elapsed_s": "Wall-clock validation prediction time after training is complete.",
+    "train_elapsed_s": "Wall-clock fit time for the method on its assigned training dataset.",
+    "validation_score": "Mean state NRMSE over open-loop validation rollouts; lower is better."
+  },
+  "model_families": [
+    "aircraft3dof"
+  ],
+  "scenarios": [
+    {
+      "id": "open_loop",
+      "method_result_count": 40,
+      "model_family": "aircraft3dof",
+      "title": "Open-loop maneuver"
+    },
+    {
+      "id": "sine_sweep",
+      "method_result_count": 40,
+      "model_family": "aircraft3dof",
+      "title": "Aggressive sine-sweep maneuver"
+    },
+    {
+      "id": "aggressive",
+      "method_result_count": 40,
+      "model_family": "aircraft3dof",
+      "title": "Aggressive nonlinear maneuver"
+    },
+    {
+      "id": "trim_grid",
+      "method_result_count": 40,
+      "model_family": "aircraft3dof",
+      "title": "Local trim-grid small-deviation maneuver"
+    },
+    {
+      "id": "open_loop_safe",
+      "method_result_count": 42,
+      "model_family": "aircraft3dof",
+      "title": "Open-loop maneuver with SAFE enabled"
+    },
+    {
+      "id": "sine_sweep_safe",
+      "method_result_count": 42,
+      "model_family": "aircraft3dof",
+      "title": "Aggressive sine-sweep with SAFE enabled"
+    },
+    {
+      "id": "aggressive_safe",
+      "method_result_count": 42,
+      "model_family": "aircraft3dof",
+      "title": "Aggressive maneuver with SAFE enabled"
+    },
+    {
+      "id": "safe_loop",
+      "method_result_count": 42,
+      "model_family": "aircraft3dof",
+      "title": "Aggressive SAFE recovery-probe maneuver"
+    }
+  ],
+  "schema_version": "0.1.0"
+}

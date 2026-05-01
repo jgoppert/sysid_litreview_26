@@ -1,0 +1,66 @@
+[
+  {
+    "max_abs_alpha_deg": 7.067621345253644,
+    "max_abs_theta_deg": 19.63126696043303,
+    "max_speed_mps": 25.627783377577586,
+    "min_speed_mps": 10.053196327165779,
+    "mode": "Open-loop maneuver",
+    "vertical_extent_m": 67.68154040511044
+  },
+  {
+    "max_abs_alpha_deg": 30.21972873938209,
+    "max_abs_theta_deg": 56.826103881371765,
+    "max_speed_mps": 28.635054263734197,
+    "min_speed_mps": 4.003989695153898,
+    "mode": "Aggressive sine-sweep maneuver",
+    "vertical_extent_m": 52.96743698427063
+  },
+  {
+    "max_abs_alpha_deg": 30.186312180839312,
+    "max_abs_theta_deg": 54.93856807630325,
+    "max_speed_mps": 20.004687506790074,
+    "min_speed_mps": 4.048244639364384,
+    "mode": "Aggressive nonlinear maneuver",
+    "vertical_extent_m": 38.968247375449465
+  },
+  {
+    "max_abs_alpha_deg": 11.909172616178047,
+    "max_abs_theta_deg": 12.42850789942004,
+    "max_speed_mps": 12.636641222942579,
+    "min_speed_mps": 9.550719873207784,
+    "mode": "Local trim-grid small-deviation maneuver",
+    "vertical_extent_m": 4.792078495353829
+  },
+  {
+    "max_abs_alpha_deg": 4.820172817900836,
+    "max_abs_theta_deg": 6.584669255459648,
+    "max_speed_mps": 15.98557332010581,
+    "min_speed_mps": 14.28288392201692,
+    "mode": "Open-loop maneuver with SAFE enabled",
+    "vertical_extent_m": 5.462865905546181
+  },
+  {
+    "max_abs_alpha_deg": 12.461723886342318,
+    "max_abs_theta_deg": 13.945957109695872,
+    "max_speed_mps": 16.69860836074975,
+    "min_speed_mps": 8.434410506348511,
+    "mode": "Aggressive sine-sweep with SAFE enabled",
+    "vertical_extent_m": 15.316850690642605
+  },
+  {
+    "max_abs_alpha_deg": 12.447036921178086,
+    "max_abs_theta_deg": 13.945751971773706,
+    "max_speed_mps": 17.217702465484418,
+    "min_speed_mps": 8.456336250621884,
+    "mode": "Aggressive maneuver with SAFE enabled",
+    "vertical_extent_m": 23.85678995259418
+  },
+  {
+    "max_abs_alpha_deg": 12.447036921178086,
+    "max_abs_theta_deg": 13.945751971773706,
+    "max_speed_mps": 15.88980583114887,
+    "min_speed_mps": 8.456336250621884,
+    "mode": "Aggressive SAFE recovery-probe maneuver",
+    "vertical_extent_m": 23.529281702609772
+  }
+]

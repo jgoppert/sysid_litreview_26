@@ -1,0 +1,166 @@
+"""Export benchmark CSV results into website-ready JSON bundles."""
+
+from __future__ import annotations
+
+import csv
+import json
+import math
+import subprocess
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from .schema import METHOD_RESULT_FIELDS, MODEL_FAMILY_3DOF, SCHEMA_VERSION
+
+
+NUMERIC_FIELDS = {
+    "validation_score",
+    "train_elapsed_s",
+    "train_cpu_s",
+    "train_gpu_s",
+    "gpu_memory_mb",
+    "rollout_elapsed_s",
+    "total_elapsed_s",
+    "train_loss_final",
+    "decision_variables",
+    "train_samples",
+    "rmse_V",
+    "rmse_alpha",
+    "rmse_gamma",
+    "rmse_Q",
+    "mocap_rmse_x_pos",
+    "mocap_rmse_z_pos",
+    "mocap_rmse_theta",
+    "coeff_residual_rmse_C_L",
+    "coeff_residual_rmse_C_D",
+    "coeff_residual_rmse_C_M",
+    "max_abs_alpha_deg",
+    "max_abs_theta_deg",
+    "min_speed_mps",
+    "max_speed_mps",
+    "vertical_extent_m",
+}
+
+
+def _git_sha(root: Path) -> str | None:
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
+def _read_csv(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    with path.open(newline="") as stream:
+        return list(csv.DictReader(stream))
+
+
+def _coerce_value(key: str, value: str | None) -> Any:
+    if value is None:
+        return None
+    text = value.strip()
+    if text == "" or text.lower() in {"nan", "none", "null"}:
+        return None
+    if key in NUMERIC_FIELDS:
+        try:
+            number = float(text)
+        except ValueError:
+            return text
+        if not math.isfinite(number):
+            return None
+        if key in {"decision_variables", "train_samples"} and number.is_integer():
+            return int(number)
+        return number
+    return text
+
+
+def _method_rows(
+    results_dir: Path,
+    dataset_modes: tuple[str, ...],
+    dataset_titles: dict[str, str],
+    method_training_modes: dict[str, str],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for scenario in dataset_modes:
+        path = results_dir / f"{scenario}_shared_method_comparison.csv"
+        for raw in _read_csv(path):
+            method = raw.get("method", "")
+            clean_method = method.removesuffix(" (mocap)")
+            record = {field: _coerce_value(field, raw.get(field)) for field in METHOD_RESULT_FIELDS}
+            record["scenario"] = scenario
+            record["scenario_title"] = dataset_titles.get(scenario, scenario.replace("_", " ").title())
+            record["model_family"] = MODEL_FAMILY_3DOF
+            record["method"] = method
+            record["training_scenario"] = method_training_modes.get(clean_method)
+            rows.append(record)
+    rows.sort(
+        key=lambda row: (
+            str(row.get("scenario") or ""),
+            str(row.get("state_source") or ""),
+            float(row.get("validation_score") or math.inf),
+            str(row.get("method") or ""),
+        )
+    )
+    return rows
+
+
+def _maneuver_rows(results_dir: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for raw in _read_csv(results_dir / "benchmark_maneuver_summary.csv"):
+        rows.append({key: _coerce_value(key, value) for key, value in raw.items()})
+    return rows
+
+
+def _write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w") as stream:
+        json.dump(payload, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+
+
+def export_web_data(
+    *,
+    root: Path,
+    output_dir: Path,
+    results_dir: Path,
+    dataset_modes: tuple[str, ...],
+    dataset_titles: dict[str, str],
+    method_training_modes: dict[str, str],
+) -> dict[str, Any]:
+    """Write JSON files consumed by the static benchmark website."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    method_rows = _method_rows(results_dir, dataset_modes, dataset_titles, method_training_modes)
+    maneuver_rows = _maneuver_rows(results_dir)
+    generated_at = datetime.now(UTC).isoformat()
+    git_sha = _git_sha(root)
+    scenarios = [
+        {
+            "id": scenario,
+            "title": dataset_titles.get(scenario, scenario.replace("_", " ").title()),
+            "model_family": MODEL_FAMILY_3DOF,
+            "method_result_count": sum(1 for row in method_rows if row.get("scenario") == scenario),
+        }
+        for scenario in dataset_modes
+    ]
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "git_sha": git_sha,
+        "model_families": [MODEL_FAMILY_3DOF],
+        "files": {
+            "method_results": "method_results.json",
+            "maneuver_summary": "maneuver_summary.json",
+        },
+        "scenarios": scenarios,
+        "metric_definitions": {
+            "validation_score": "Mean state NRMSE over open-loop validation rollouts; lower is better.",
+            "train_elapsed_s": "Wall-clock fit time for the method on its assigned training dataset.",
+            "rollout_elapsed_s": "Wall-clock validation prediction time after training is complete.",
+        },
+    }
+    _write_json(output_dir / "method_results.json", method_rows)
+    _write_json(output_dir / "maneuver_summary.json", maneuver_rows)
+    _write_json(output_dir / "manifest.json", manifest)
+    return manifest

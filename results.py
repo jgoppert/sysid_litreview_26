@@ -15,6 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
+from methods.benchmark.export import export_web_data
+
 
 ROOT = Path(__file__).resolve().parent
 METHODS = ROOT / "methods"
@@ -1509,12 +1511,26 @@ def build_pdf(_args: argparse.Namespace) -> None:
     run([sys.executable, str(LATEX / "paper.py"), "build"], cwd=LATEX)
 
 
+def web_data(args: argparse.Namespace) -> None:
+    manifest = export_web_data(
+        root=ROOT,
+        output_dir=args.output,
+        results_dir=METHOD_RESULTS,
+        dataset_modes=DATASET_MODES,
+        dataset_titles=DATASET_TITLES,
+        method_training_modes=METHOD_TRAINING_MODES,
+    )
+    print(f"Wrote web benchmark data to {args.output}")
+    print(f"Exported {len(manifest['scenarios'])} scenarios at schema {manifest['schema_version']}")
+
+
 def all_results(args: argparse.Namespace) -> None:
     if not args.skip_simulate:
         simulate(args)
     rates(args)
     suite(args)
     latex_assets(args)
+    web_data(argparse.Namespace(output=ROOT / "site" / "public" / "data"))
     if args.build:
         build_pdf(args)
 
@@ -1587,6 +1603,10 @@ def parse_args() -> argparse.Namespace:
 
     p_assets = sub.add_parser("latex-assets", help="export current method results into latex/generated and latex/fig")
     p_assets.set_defaults(func=latex_assets)
+
+    p_web = sub.add_parser("web-data", help="export current method results into site/public/data JSON")
+    p_web.add_argument("--output", type=Path, default=ROOT / "site" / "public" / "data")
+    p_web.set_defaults(func=web_data)
 
     p_build = sub.add_parser("build", help="build latex/main.pdf")
     p_build.set_defaults(func=build_pdf)
