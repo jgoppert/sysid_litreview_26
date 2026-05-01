@@ -50,8 +50,24 @@ MOCAP_ONLY_BUILTINS = {
 SIX_DOF_BUILTINS = {
     "6DOF-Nominal": ("direct", "mocap"),
     "6DOF-LinearSS": ("direct", "mocap"),
+    "6DOF-Model-Stitching": ("direct", "mocap"),
+    "6DOF-Subspace-Hankel": ("direct", "mocap"),
+    "6DOF-Frequency-Welch": ("direct", "mocap"),
+    "6DOF-Frequency-Stitching": ("direct", "mocap"),
+    "6DOF-Koopman-EDMD": ("direct", "mocap"),
+    "6DOF-EquationError-LS": ("direct", "mocap"),
+    "6DOF-EKF-ParamID": ("direct", "mocap"),
+    "6DOF-Fisher-UQ": ("direct", "mocap"),
+    "6DOF-OEM-SS": ("direct", "mocap"),
     "6DOF-RidgeResidual": ("direct", "mocap"),
-    "6DOF-MocapOutputARX": ("mocap",),
+    "6DOF-OEM-MocapOutput": ("mocap",),
+    "6DOF-Variational-Mocap": ("direct", "mocap"),
+    "6DOF-SINDy": ("direct", "mocap"),
+    "6DOF-Symbolic-Stepwise": ("direct", "mocap"),
+    "6DOF-GP-RBF": ("direct", "mocap"),
+    "6DOF-UDE-Residual": ("direct", "mocap"),
+    "6DOF-PINN-Closure": ("direct", "mocap"),
+    "6DOF-NN-Surrogate": ("direct", "mocap"),
 }
 
 

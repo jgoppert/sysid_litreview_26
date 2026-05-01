@@ -50,5 +50,21 @@ Current baseline methods:
 
 - `6DOF-Nominal`: attached-flow RK4 rollout with the supplied pilot-command history.
 - `6DOF-LinearSS`: global affine discrete state-space ridge fit.
+- `6DOF-Model-Stitching`: airdata-scheduled local affine state-space models.
+- `6DOF-Subspace-Hankel`: lagged ARX/Hankel predictor.
+- `6DOF-Frequency-Welch`: regularized identified-realization frequency baseline.
+- `6DOF-Frequency-Stitching`: airdata-scheduled local realization residuals.
+- `6DOF-Koopman-EDMD`: quadratic lifted one-step predictor.
+- `6DOF-EquationError-LS`: affine derivative regression.
+- `6DOF-EKF-ParamID`: fitted residual parameter vector with open-loop validation.
+- `6DOF-Fisher-UQ`: uncertainty-wrapper row around the fitted residual parameter model.
+- `6DOF-OEM-SS`: lightweight output-error state-space analogue.
 - `6DOF-RidgeResidual`: attached-flow RK4 rollout plus a ridge one-step residual.
-- `6DOF-MocapOutputARX`: mocap position/quaternion output predictor.
+- `6DOF-OEM-MocapOutput`: mocap position/quaternion output predictor.
+- `6DOF-Variational-Mocap`: smoothed weak-form derivative baseline.
+- `6DOF-SINDy`: sparse quadratic-library derivative model.
+- `6DOF-Symbolic-Stepwise`: sparse quadratic one-step predictor.
+- `6DOF-GP-RBF`: sparse RBF residual surrogate.
+- `6DOF-UDE-Residual`: nominal dynamics plus quadratic residual closure.
+- `6DOF-PINN-Closure`: physics-structured sparse residual closure.
+- `6DOF-NN-Surrogate`: random-feature neural residual surrogate.
