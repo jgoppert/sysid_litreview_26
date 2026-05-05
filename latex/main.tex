@@ -9,20 +9,17 @@
 \usepackage{graphicx}
 \usepackage{amsmath}
 \usepackage{amssymb}
-\usepackage[version=4]{mhchem}
-\usepackage{siunitx}
 \usepackage{longtable,tabularx}
 \setlength\LTleft{0pt} 
 \usepackage{xcolor}
-\usepackage{svg}
 \usepackage{float}
 \usepackage{placeins}
 \usepackage{ifthen}
 \usepackage{natbib}
 \usepackage{url}
 \usepackage{hyperref}
-\svgsetup{inkscapepath=fig/}
-\svgpath{{fig/}}  % directory containing figures
+\graphicspath{{fig/}}  % directory containing figures
+\newcommand{\includesvg}[2][]{\includegraphics[#1]{#2}}
 \hypersetup{hidelinks}
 \setcounter{MaxMatrixCols}{20}
 
