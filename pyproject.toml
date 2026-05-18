@@ -30,9 +30,9 @@ py-modules = [
 packages = [
   "benchmark",
   "common",
-  "datasets",
-  "datasets.sportcub_mocap_4_17_26",
-  "datasets.synthetic_3dof",
+  "dataset_tools",
+  "dataset_tools.sportcub_mocap_4_17_26",
+  "dataset_tools.synthetic_3dof",
   "models",
   "models.aircraft3dof",
   "models.aircraft6dof",

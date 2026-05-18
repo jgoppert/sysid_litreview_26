@@ -13,7 +13,7 @@ compact datasets, and generated paper/site artifacts.
 - `methods/neural_residual/` UDE/neural-residual dynamics experiments.
 - `benchmark/` orchestration, registries, schema, website export, and plugin API.
 - `models/` canonical 3DOF/6DOF aircraft dynamics and dataset helpers.
-- `datasets/` canonical dataset manifests, validation, and preprocessing entry points.
+- `dataset_tools/` canonical dataset manifests, validation, and preprocessing entry points.
 - `data/` compact committed datasets only.
 - `work/` ignored local raw/generated data cache.
 - `latex/fig/` generated paper figures.

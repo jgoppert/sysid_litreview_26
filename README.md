@@ -13,7 +13,7 @@ and a static benchmark browser published through GitHub Pages.
 - `benchmark/`: orchestration, registries, schema, website export, and plugin API.
 - `models/`: canonical 3DOF/6DOF aircraft dynamics and synthetic dataset helpers.
 - `methods/`: method implementations and plugin examples.
-- `datasets/`: contributed dataset manifests, validation, and preprocessing code.
+- `dataset_tools/`: contributed dataset manifests, validation, and preprocessing code.
 - `data/`: compact committed real datasets only, as flat NPZ split files.
 - `work/`: ignored raw downloads, intermediate processing, and generated simulator data.
 - `results/`: benchmark CSVs and metadata.
@@ -58,7 +58,7 @@ Each NPZ stores the canonical ragged time-series arrays plus scalar
 
 The current real dataset is `sportcub_mocap_4_17_26`; its raw Sport Cub data is
 not committed. The dataset manifest and canonicalization code live under
-`datasets/sportcub_mocap_4_17_26/`.
+`dataset_tools/sportcub_mocap_4_17_26/`.
 
 See [docs/DATASET_CONTRACT.md](docs/DATASET_CONTRACT.md) for the required NPZ
 schema and [docs/BENCHMARK.md](docs/BENCHMARK.md) for the full workflow.

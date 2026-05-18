@@ -15,7 +15,7 @@ import numpy as np
 from .schema import METHOD_RESULT_FIELDS, MODEL_FAMILY_3DOF, MODEL_FAMILY_6DOF, SCHEMA_VERSION
 from .registry import all_method_metadata, metadata_to_dict
 from .scenarios import SCENARIOS_3DOF, SCENARIOS_6DOF, SIX_DOF_SCENARIO_TITLES
-from datasets.registry import discover_manifests
+from dataset_tools.registry import discover_manifests
 
 
 NUMERIC_FIELDS = {
@@ -177,7 +177,7 @@ def _generated_dataset_registry(root: Path) -> list[dict[str, Any]]:
                 "generator": scenario.generator or (
                     "models.aircraft6dof.generate_dataset"
                     if scenario.model_family == MODEL_FAMILY_6DOF
-                    else "datasets.synthetic_3dof.compact"
+                    else "dataset_tools.synthetic_3dof.compact"
                 ),
                 "local_data_files": local_files,
                 "tags": list(scenario.tags),
@@ -460,7 +460,7 @@ def export_web_data(
     method_rows.extend(_six_dof_rows(results_dir))
     method_rows.extend(_real_dataset_rows(results_dir))
     maneuver_rows = _maneuver_rows(results_dir)
-    dataset_manifests = [*_generated_dataset_registry(root), *discover_manifests(root / "datasets")]
+    dataset_manifests = [*_generated_dataset_registry(root), *discover_manifests(root / "dataset_tools")]
     playback_rows = _playback_registry(root, dataset_manifests)
     trace_rows = _method_trace_registry(results_dir)
     generated_at = datetime.now(UTC).isoformat()

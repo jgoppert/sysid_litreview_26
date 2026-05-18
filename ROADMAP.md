@@ -55,7 +55,7 @@ Every published dataset and result bundle should identify:
 
 Large contributed datasets are indexed in git but stored out-of-band. During
 early review a dataset may use a provisional Google Drive, SharePoint, Dropbox,
-or similar source URL in `work/datasets/<dataset_id>/dataset.json`; merged
+or similar source URL in `dataset_tools/<dataset_id>/dataset.json`; merged
 manifests must record status, source URL, expected size/checksum when known,
 license, contact, and date accessed. Maintainers should later mirror accepted
 datasets to a durable archive such as Zenodo, Purdue, OSF, Dataverse, or a

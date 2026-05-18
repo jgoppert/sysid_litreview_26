@@ -19,7 +19,7 @@ import numpy as np
 
 from benchmark.export import export_web_data
 from benchmark.paths import (
-    DATASETS,
+    DATASET_TOOLS,
     LATEX,
     LATEX_FIG,
     LATEX_GENERATED,
@@ -1114,7 +1114,7 @@ def compact_3dof(args: argparse.Namespace) -> None:
     command = [
         sys.executable,
         "-m",
-        "datasets.synthetic_3dof.compact",
+        "dataset_tools.synthetic_3dof.compact",
         "--output",
         str(args.output),
         "--dataset-mode",
@@ -1212,7 +1212,7 @@ def all_6dof(args: argparse.Namespace) -> None:
 
 
 def fetch_dataset(args: argparse.Namespace) -> None:
-    command = [sys.executable, "-m", "datasets.fetch", args.dataset_id]
+    command = [sys.executable, "-m", "dataset_tools.fetch", args.dataset_id]
     if args.output_dir is not None:
         command.extend(["--output-dir", str(args.output_dir)])
     if args.url is not None:
@@ -1226,7 +1226,7 @@ def process_dataset(args: argparse.Namespace) -> None:
     command = [
         sys.executable,
         "-m",
-        "datasets.sportcub_mocap_4_17_26.process",
+        "dataset_tools.sportcub_mocap_4_17_26.process",
         "--data-root",
         str(args.data_root),
         "--steps",
@@ -1245,7 +1245,7 @@ def canonicalize_dataset(args: argparse.Namespace) -> None:
     command = [
         sys.executable,
         "-m",
-        "datasets.sportcub_mocap_4_17_26.canonicalize",
+        "dataset_tools.sportcub_mocap_4_17_26.canonicalize",
         "--data-root",
         str(args.data_root),
         "--output",
@@ -1255,7 +1255,7 @@ def canonicalize_dataset(args: argparse.Namespace) -> None:
 
 
 def check_data(args: argparse.Namespace) -> None:
-    command = [sys.executable, "-m", "datasets.validate_format"]
+    command = [sys.executable, "-m", "dataset_tools.validate_format"]
     if args.dataset:
         command.extend(args.dataset)
     if args.allow_empty:
@@ -1348,7 +1348,7 @@ def _sportcub_result_metrics(path: Path) -> dict[str, float | int]:
 
 
 def export_sportcub_real(args: argparse.Namespace) -> None:
-    from datasets.registry import load_manifest, source_url
+    from dataset_tools.registry import load_manifest, source_url
 
     data_root = _sportcub_data_root(args)
     if args.run_sysid:
@@ -1870,21 +1870,21 @@ def check_setup(_args: argparse.Namespace) -> None:
         "benchmark/method_api.py",
         "benchmark/registry.py",
         "benchmark/smoke_plugin.py",
-        "datasets/fetch.py",
-        "datasets/registry.py",
-        "datasets/validate_dataset.py",
-        "datasets/validate_format.py",
-        "datasets/synthetic_3dof/compact.py",
-        "datasets/sportcub_mocap_4_17_26/canonicalize.py",
-        "datasets/sportcub_mocap_4_17_26/process.py",
+        "dataset_tools/fetch.py",
+        "dataset_tools/registry.py",
+        "dataset_tools/validate_dataset.py",
+        "dataset_tools/validate_format.py",
+        "dataset_tools/synthetic_3dof/compact.py",
+        "dataset_tools/sportcub_mocap_4_17_26/canonicalize.py",
+        "dataset_tools/sportcub_mocap_4_17_26/process.py",
         "models/aircraft6dof/model.py",
         "models/aircraft6dof/comparison_suite.py",
         "models/aircraft6dof/smoke.py",
         "results.py",
     ]
     run([sys.executable, "-m", "py_compile", *py_files])
-    run([sys.executable, "-m", "datasets.validate_dataset", str(DATASETS / SPORTCUB_DATASET_ID)])
-    run([sys.executable, "-m", "datasets.validate_format", "--allow-empty"])
+    run([sys.executable, "-m", "dataset_tools.validate_dataset", str(DATASET_TOOLS / SPORTCUB_DATASET_ID)])
+    run([sys.executable, "-m", "dataset_tools.validate_format", "--allow-empty"])
     registered_methods = all_method_metadata(METHOD_CODE / "plugins")
     if not registered_methods:
         raise SystemExit("method registry is empty")
