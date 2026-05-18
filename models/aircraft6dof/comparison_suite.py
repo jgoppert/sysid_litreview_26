@@ -1411,13 +1411,24 @@ def quat_wxyz_from_rotation(matrix: np.ndarray) -> np.ndarray:
     return normalize_quaternion(quat)
 
 
+def integrate_state_position_enu(t: np.ndarray, x: np.ndarray) -> np.ndarray:
+    pos_ned = np.empty_like(x[:, 0:3])
+    pos_ned[0] = x[0, 0:3]
+    velocity_ned = np.asarray([rotation_body_to_inertial(q) @ state[3:6] for state, q in zip(x, x[:, 6:10])])
+    for index in range(len(t) - 1):
+        dt = float(t[index + 1] - t[index])
+        pos_ned[index + 1] = pos_ned[index] + 0.5 * dt * (velocity_ned[index] + velocity_ned[index + 1])
+    position = np.column_stack([pos_ned[:, 1], pos_ned[:, 0], -pos_ned[:, 2]])
+    return position - position[0]
+
+
 def state_segment_to_web(t: np.ndarray, x: np.ndarray, u_cmd: np.ndarray, name: str) -> dict[str, object]:
+    position = integrate_state_position_enu(t, x)
     stride = max(1, int(np.ceil(len(t) / WEB_TRACE_MAX_POINTS)))
     t = t[::stride]
     x = x[::stride]
     u_cmd = u_cmd[::stride]
-    position = np.column_stack([x[:, 1], x[:, 0], -x[:, 2]])
-    position = position - position[0]
+    position = position[::stride]
     quat = np.asarray([quat_wxyz_from_rotation(NED_TO_ENU @ rotation_body_to_inertial(q)) for q in x[:, 6:10]])
     return {
         "name": name,
