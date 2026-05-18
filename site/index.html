@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>System Identification Benchmarks</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="./src/styles.css">
   </head>
   <body>
@@ -17,8 +18,12 @@
 
     <main class="layout">
       <section class="controls" aria-label="Benchmark filters">
+        <div>
+          <span class="control-label">Model</span>
+          <div class="segmented" id="model-tabs"></div>
+        </div>
         <label>
-          Scenario
+          Dataset
           <select id="scenario-select"></select>
         </label>
         <div>
@@ -36,34 +41,38 @@
           <strong id="best-method">--</strong>
         </div>
         <div class="metric">
-          <span>Best validation NRMSE</span>
+          <span>Best score</span>
           <strong id="best-score">--</strong>
         </div>
         <div class="metric">
-          <span>Methods compared</span>
+          <span>Methods</span>
           <strong id="method-count">--</strong>
         </div>
         <div class="metric">
-          <span>Maneuver envelope</span>
-          <strong id="maneuver-envelope">--</strong>
+          <span>Datasets</span>
+          <strong id="dataset-count">--</strong>
         </div>
+      </section>
+
+      <section class="panel playback-panel">
+        <div class="panel-heading">
+          <h2>Aircraft Playback</h2>
+          <p id="playback-status">Loading trajectory...</p>
+        </div>
+        <div id="aircraft-playback" class="aircraft-playback" aria-label="Animated aircraft state playback"></div>
       </section>
 
       <section class="panel">
         <div class="panel-heading">
-          <div>
-            <h2>Cost-Error Tradeoff</h2>
-            <p>Horizontal position is training time. Vertical position is mean state NRMSE. Lower is better.</p>
-          </div>
+          <h2>Cost-Error Tradeoff</h2>
         </div>
         <div id="tradeoff-plot" class="plot" role="img" aria-label="Training time versus validation error plot"></div>
       </section>
 
-      <section class="two-column">
+      <section class="grid-main">
         <div class="panel">
           <div class="panel-heading">
-            <h2>Leaderboard</h2>
-            <p>Sorted by validation NRMSE for the selected scenario and state source.</p>
+            <h2>Method Comparisons</h2>
           </div>
           <div class="table-wrap">
             <table>
@@ -81,12 +90,60 @@
           </div>
         </div>
 
-        <div class="panel">
-          <div class="panel-heading">
-            <h2>Maneuver Summary</h2>
-            <p>Envelope statistics from the generated validation maneuvers.</p>
+        <div class="side-stack">
+          <div class="panel">
+            <div class="panel-heading">
+              <h2>Maneuver</h2>
+            </div>
+            <dl class="maneuver-list" id="maneuver-list"></dl>
           </div>
-          <dl class="maneuver-list" id="maneuver-list"></dl>
+
+          <div class="panel">
+            <div class="panel-heading">
+              <h2>Dataset Actions</h2>
+            </div>
+            <div class="upload-form">
+              <label>
+                Data family
+                <select id="upload-data-family">
+                  <option value="aircraft3dof">3DOF compact</option>
+                  <option value="aircraft6dof">6DOF compact</option>
+                </select>
+              </label>
+              <label>
+                Compact dataset
+                <input id="upload-file" type="file" accept=".npz,.json,application/json">
+              </label>
+              <button type="button" id="upload-run">Validate Upload</button>
+              <label>
+                Existing method to run
+                <select id="upload-method"></select>
+              </label>
+              <button type="button" id="method-command">Run Command</button>
+              <button type="button" id="simulate-command">Sim Dataset Command</button>
+              <p id="upload-status" class="upload-status"></p>
+              <pre id="command-output" class="command-output"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Datasets</h2>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Dataset</th>
+                <th>Status</th>
+                <th>Source</th>
+                <th>Location</th>
+              </tr>
+            </thead>
+            <tbody id="dataset-body"></tbody>
+          </table>
         </div>
       </section>
     </main>

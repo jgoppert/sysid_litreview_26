@@ -1,0 +1,64 @@
+"""Validate the static benchmark website bundle."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parent
+DATA = ROOT / "public" / "data"
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise SystemExit(message)
+
+
+def load_json(name: str):
+    path = DATA / name
+    require(path.exists(), f"missing site data file: {path}")
+    return json.loads(path.read_text())
+
+
+def main() -> int:
+    manifest = load_json("manifest.json")
+    method_results = load_json("method_results.json")
+    load_json("maneuver_summary.json")
+    playback = load_json("playback.json")
+    index = (ROOT / "index.html").read_text()
+    app = (ROOT / "src" / "app.js").read_text()
+
+    for selector in [
+        "scenario-select",
+        "model-tabs",
+        "leaderboard-body",
+        "dataset-body",
+        "upload-file",
+        "upload-data-family",
+        "upload-method",
+        "method-command",
+        "simulate-command",
+        "aircraft-playback",
+        "playback-status",
+    ]:
+        require(selector in index, f"missing site element #{selector}")
+
+    scenarios = manifest.get("scenarios") or []
+    datasets = manifest.get("dataset_registry") or []
+    families = set(manifest.get("model_families") or [])
+    require(scenarios, "site manifest has no scenarios")
+    require(datasets, "site manifest has no datasets")
+    require({"aircraft3dof", "aircraft6dof"}.issubset(families), "site manifest must include 3DOF and 6DOF families")
+    require(any(dataset.get("source_type") == "synthetic_simulation" for dataset in datasets), "generated simulation datasets are missing")
+    require(any(dataset.get("source_type") == "real_mocap" for dataset in datasets), "real datasets are missing")
+    require(method_results, "site has no method results")
+    require(playback, "site has no playback trajectories")
+    require("three" in app.lower() and "renderPlayback" in app, "Three.js playback code is missing")
+    require("validateUploadedDataset" in app and "readNpzManifest" in app, "browser dataset validation code is missing")
+    print(f"site ok: {len(scenarios)} scenarios, {len(datasets)} datasets, {len(method_results)} result rows")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

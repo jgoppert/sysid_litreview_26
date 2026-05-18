@@ -1,0 +1,41 @@
+{
+  "datasets": [
+    "/home/jgoppert/git/system_identification/data/sportcub_mocap_4_17_26"
+  ],
+  "methods": [
+    "6DOF-EKF-ParamID",
+    "6DOF-EquationError-LS",
+    "6DOF-Fisher-UQ",
+    "6DOF-Frequency-Stitching",
+    "6DOF-Frequency-Welch",
+    "6DOF-GP-RBF",
+    "6DOF-Koopman-EDMD",
+    "6DOF-LinearSS",
+    "6DOF-Model-Stitching",
+    "6DOF-NN-Surrogate",
+    "6DOF-Nominal",
+    "6DOF-OEM-MocapOutput",
+    "6DOF-OEM-SS",
+    "6DOF-PINN-Closure",
+    "6DOF-RidgeResidual",
+    "6DOF-SINDy",
+    "6DOF-Subspace-Hankel",
+    "6DOF-Symbolic-Stepwise",
+    "6DOF-UDE-Residual",
+    "6DOF-Variational-Mocap"
+  ],
+  "metric": "Validation score is full-state mean NRMSE for state predictors and mocap-output NRMSE for 6DOF-OEM-MocapOutput.",
+  "model_family": "aircraft6dof",
+  "result_rows": 39,
+  "scenarios": [
+    "sportcub_mocap_4_17_26"
+  ],
+  "state_sources": [
+    "direct",
+    "mocap"
+  ],
+  "training_scenarios": [
+    "none",
+    "sportcub_mocap_4_17_26"
+  ]
+}

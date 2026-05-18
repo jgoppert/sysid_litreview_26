@@ -17,118 +17,37 @@ from pathlib import Path
 
 import numpy as np
 
-from methods.benchmark.export import export_web_data
-
-
-ROOT = Path(__file__).resolve().parent
-METHODS = ROOT / "methods"
-LATEX = ROOT / "latex"
-METHOD_RESULTS = METHODS / "results"
-METHOD_FIG = METHODS / "fig"
-LATEX_GENERATED = LATEX / "generated"
-LATEX_FIG = LATEX / "fig"
-DATASET_MODES = (
-    "open_loop",
-    "sine_sweep",
-    "aggressive",
-    "trim_grid",
-    "open_loop_safe",
-    "sine_sweep_safe",
-    "aggressive_safe",
-    "safe_loop",
+from benchmark.export import export_web_data
+from benchmark.paths import (
+    DATASETS,
+    LATEX,
+    LATEX_FIG,
+    LATEX_GENERATED,
+    LATEX_TABLES,
+    METHOD_CODE,
+    RESULTS as METHOD_RESULTS,
+    ROOT,
+    SPORTCUB_DATASET_ID,
+    WORK,
+    WORK_DATA,
 )
-DATASET_OUTPUTS = {
-    "open_loop": METHODS / "data" / "longitudinal_3dof_nonlinear_open_loop",
-    "sine_sweep": METHODS / "data" / "longitudinal_3dof_nonlinear_sine_sweep",
-    "aggressive": METHODS / "data" / "longitudinal_3dof_nonlinear_aggressive",
-    "trim_grid": METHODS / "data" / "longitudinal_3dof_nonlinear_trim_grid",
-    "open_loop_safe": METHODS / "data" / "longitudinal_3dof_nonlinear_open_loop_safe",
-    "sine_sweep_safe": METHODS / "data" / "longitudinal_3dof_nonlinear_sine_sweep_safe",
-    "aggressive_safe": METHODS / "data" / "longitudinal_3dof_nonlinear_aggressive_safe",
-    "safe_loop": METHODS / "data" / "longitudinal_3dof_nonlinear_safe_loop",
-    "proprietary_autopilot": METHODS / "data" / "longitudinal_3dof_nonlinear_proprietary_autopilot",
-}
-DATASET_TITLES = {
-    "open_loop": "Open-loop maneuver",
-    "sine_sweep": "Aggressive sine-sweep maneuver",
-    "aggressive": "Aggressive nonlinear maneuver",
-    "trim_grid": "Local trim-grid small-deviation maneuver",
-    "open_loop_safe": "Open-loop maneuver with SAFE enabled",
-    "sine_sweep_safe": "Aggressive sine-sweep with SAFE enabled",
-    "aggressive_safe": "Aggressive maneuver with SAFE enabled",
-    "safe_loop": "Aggressive SAFE recovery-probe maneuver",
-    "proprietary_autopilot": "Hidden-controller maneuver",
-}
-SIX_DOF_DATASET_MODES = ("open_loop", "sine_sweep", "aggressive", "trim_grid")
-SIX_DOF_DATASET_OUTPUTS = {
-    "open_loop": METHODS / "data" / "aircraft_6dof_open_loop",
-    "sine_sweep": METHODS / "data" / "aircraft_6dof_sine_sweep",
-    "aggressive": METHODS / "data" / "aircraft_6dof_aggressive",
-    "trim_grid": METHODS / "data" / "aircraft_6dof_trim_grid",
-}
-SIX_DOF_DATASET_TITLES = {
-    "open_loop": "6-DOF open-loop maneuver",
-    "sine_sweep": "6-DOF sine-sweep maneuver",
-    "aggressive": "6-DOF aggressive nonlinear stall maneuver",
-    "trim_grid": "6-DOF local trim-grid small-deviation maneuver",
-}
-METHOD_WORKERS = (
-    "Nominal",
-    "Linear-SS",
-    "Model-Stitching",
-    "Koopman-EDMD",
-    "Subspace-Hankel",
-    "Frequency-Welch",
-    "Frequency-Stitching",
-    "EquationError-LS",
-    "EKF-ParamID",
-    "Fisher-UQ",
-    "OEM-SS",
-    "OEM-MocapOutput",
-    "Variational-Mocap",
-    "OEM-HiddenController",
-    "SINDy",
-    "Symbolic-Stepwise",
-    "GP-CoeffClosure",
-    "UDE-Residual",
-    "PINN-CoeffClosure",
-    "UDE-HiddenControl",
-    "PINN-HiddenElevator",
-    "NN-CoeffSurrogate",
+from benchmark.registry import gpu_method_names, heavy_method_names, method_training_modes, worker_method_names
+from benchmark.scenarios import (
+    DATASET_MODES,
+    DATASET_OUTPUTS,
+    DATASET_TITLES,
+    SIX_DOF_DATASET_MODES,
+    SIX_DOF_DATASET_OUTPUTS,
+    SIX_DOF_DATASET_TITLES,
 )
-HEAVY_METHOD_WORKERS: set[str] = set()
-GPU_METHOD_WORKERS = {
-    "UDE-Residual",
-    "PINN-CoeffClosure",
-    "UDE-HiddenControl",
-    "PINN-HiddenElevator",
-    "NN-CoeffSurrogate",
-}
 
-METHOD_TRAINING_MODES = {
-    "Nominal": "open_loop",
-    "Linear-SS": "trim_grid",
-    "Model-Stitching": "trim_grid",
-    "Subspace-Hankel": "trim_grid",
-    "Frequency-Welch": "trim_grid",
-    "Frequency-Stitching": "trim_grid",
-    "Koopman-EDMD": "aggressive",
-    "EquationError-LS": "aggressive",
-    "EKF-ParamID": "aggressive",
-    "Fisher-UQ": "aggressive",
-    "OEM-SS": "aggressive",
-    "OEM-MocapOutput": "aggressive",
-    "Variational-Mocap": "aggressive",
-    "SINDy": "aggressive",
-    "Symbolic-Stepwise": "aggressive",
-    "GP-CoeffClosure": "aggressive",
-    "UDE-Residual": "aggressive",
-    "PINN-CoeffClosure": "aggressive",
-    "NN-CoeffSurrogate": "aggressive",
-    "OEM-HiddenController": "safe_loop",
-    "UDE-HiddenControl": "safe_loop",
-    "PINN-HiddenElevator": "safe_loop",
-}
+
+METHOD_FIG = LATEX_FIG
+METHOD_TABLES = LATEX_TABLES
+METHOD_WORKERS = worker_method_names()
+HEAVY_METHOD_WORKERS = heavy_method_names()
+GPU_METHOD_WORKERS = gpu_method_names()
+METHOD_TRAINING_MODES = method_training_modes()
 
 FIGURE_EXPORTS = {
     "shared_validation_score_comparison.svg": "generated_shared_validation_score_comparison.svg",
@@ -165,13 +84,25 @@ TRADEOFF_FAILURE_THRESHOLD = 1.0
 
 
 def methods_python() -> str:
-    venv_python = METHODS / ".venv" / "bin" / "python"
+    venv_python = ROOT / ".venv" / "bin" / "python"
     return str(venv_python if venv_python.exists() else Path(sys.executable))
 
 
 def run(command: list[str], cwd: Path = ROOT) -> None:
     print("+", " ".join(command), flush=True)
     subprocess.run(command, cwd=cwd, check=True)
+
+
+def run_with_env(command: list[str], *, cwd: Path = ROOT, env: dict[str, str] | None = None) -> None:
+    print("+", " ".join(command), flush=True)
+    subprocess.run(command, cwd=cwd, env=env, check=True)
+
+
+def relative_or_absolute(path: Path, root: Path = ROOT) -> str:
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
 
 
 def worker_env(threads_per_worker: int = 1) -> dict[str, str]:
@@ -304,7 +235,7 @@ def clean_suite_artifacts(modes: list[str] | tuple[str, ...]) -> None:
     removed = 0
     for mode in modes:
         for filename in ARCHIVED_RESULTS:
-            for directory in (METHOD_RESULTS, METHODS / "tables"):
+            for directory in (METHOD_RESULTS, METHOD_TABLES):
                 path = archived_path(mode, filename, directory)
                 if path.exists():
                     path.unlink()
@@ -316,7 +247,7 @@ def clean_suite_artifacts(modes: list[str] | tuple[str, ...]) -> None:
                     path.unlink()
                     removed += 1
     for filename in ARCHIVED_RESULTS:
-        for directory in (METHOD_RESULTS, METHODS / "tables"):
+        for directory in (METHOD_RESULTS, METHOD_TABLES):
             path = directory / filename
             if path.exists():
                 path.unlink()
@@ -1141,7 +1072,7 @@ def latex_assets(_args: argparse.Namespace) -> None:
     write_experiment_method_tables()
     write_observation_rate_table()
     write_uq_table()
-    six_dof_table = METHODS / "tables" / "aircraft6dof_method_comparison.tex"
+    six_dof_table = METHOD_TABLES / "aircraft6dof_method_comparison.tex"
     if six_dof_table.exists():
         shutil.copy2(six_dof_table, LATEX_GENERATED / "aircraft6dof_method_comparison_table.tex")
     plot_train_time_accuracy()
@@ -1161,7 +1092,7 @@ def simulate(args: argparse.Namespace) -> None:
     for mode in args.dataset_modes:
         command = [
             sys.executable,
-            str(METHODS / "simulation" / "generate_dataset.py"),
+            str(ROOT / "simulation" / "generate_dataset.py"),
             "--output",
             str(DATASET_OUTPUTS[mode]),
             "--dataset-mode",
@@ -1176,6 +1107,29 @@ def simulate(args: argparse.Namespace) -> None:
         if args.no_plot:
             command.append("--no-plot")
         run(command)
+
+
+def compact_3dof(args: argparse.Namespace) -> None:
+    command = [
+        sys.executable,
+        "-m",
+        "datasets.synthetic_3dof.compact",
+        "--output",
+        str(args.output),
+        "--dataset-mode",
+        args.dataset_mode,
+        "--train-trials",
+        str(args.train_trials),
+        "--validation-trials",
+        str(args.validation_trials),
+        "--duration",
+        str(args.duration),
+        "--dt",
+        str(args.dt),
+        "--seed",
+        str(args.seed),
+    ]
+    run(command)
 
 
 def simulate_6dof(args: argparse.Namespace) -> None:
@@ -1203,7 +1157,7 @@ def simulate_6dof(args: argparse.Namespace) -> None:
         ]
         if args.no_plot:
             command.append("--no-plot")
-        run(command, cwd=METHODS)
+        run(command, cwd=ROOT)
 
 
 def suite_6dof(args: argparse.Namespace) -> None:
@@ -1223,16 +1177,17 @@ def suite_6dof(args: argparse.Namespace) -> None:
         "--fig-dir",
         str(METHOD_FIG),
         "--table-dir",
-        str(METHODS / "tables"),
+        str(METHOD_TABLES),
     ]
     if dataset_modes:
         command.append("--datasets")
         command.extend(str(SIX_DOF_DATASET_OUTPUTS[mode]) for mode in dataset_modes)
     else:
-        command.extend(["--dataset", str(args.dataset)])
+        dataset = args.dataset if args.dataset.is_absolute() else ROOT / args.dataset
+        command.extend(["--dataset", str(dataset)])
     if args.no_plot:
         command.append("--no-plot")
-    run(command, cwd=METHODS)
+    run(command, cwd=ROOT)
 
 
 def all_6dof(args: argparse.Namespace) -> None:
@@ -1255,15 +1210,221 @@ def all_6dof(args: argparse.Namespace) -> None:
         build_pdf(args)
 
 
+def fetch_dataset(args: argparse.Namespace) -> None:
+    command = [sys.executable, "-m", "datasets.fetch", args.dataset_id]
+    if args.output_dir is not None:
+        command.extend(["--output-dir", str(args.output_dir)])
+    if args.url is not None:
+        command.extend(["--url", args.url])
+    run(command)
+
+
+def process_dataset(args: argparse.Namespace) -> None:
+    if args.dataset_id != SPORTCUB_DATASET_ID:
+        raise SystemExit(f"unknown dataset processor: {args.dataset_id}")
+    command = [
+        sys.executable,
+        "-m",
+        "datasets.sportcub_mocap_4_17_26.process",
+        "--data-root",
+        str(args.data_root),
+        "--steps",
+        args.steps,
+    ]
+    if args.only_cases:
+        command.extend(["--only-cases", args.only_cases])
+    if args.no_plots:
+        command.append("--no-plots")
+    run(command)
+
+
+def canonicalize_dataset(args: argparse.Namespace) -> None:
+    if args.dataset_id != SPORTCUB_DATASET_ID:
+        raise SystemExit(f"unknown dataset canonicalizer: {args.dataset_id}")
+    command = [
+        sys.executable,
+        "-m",
+        "datasets.sportcub_mocap_4_17_26.canonicalize",
+        "--data-root",
+        str(args.data_root),
+        "--output",
+        str(args.output),
+    ]
+    run(command)
+
+
+def check_data(args: argparse.Namespace) -> None:
+    command = [sys.executable, "-m", "datasets.validate_format"]
+    if args.dataset:
+        command.extend(args.dataset)
+    if args.allow_empty:
+        command.append("--allow-empty")
+    run(command)
+
+
+def _sportcub_data_root(args: argparse.Namespace) -> Path:
+    if getattr(args, "data_root", None) is not None:
+        return args.data_root
+    standard = WORK_DATA / SPORTCUB_DATASET_ID / "raw"
+    nested = standard / "Sports_Cub_Data_17April"
+    if nested.exists():
+        return nested
+    return standard
+
+
+def _run_sportcub_sysid(args: argparse.Namespace, data_root: Path) -> None:
+    raise SystemExit(
+        "The legacy Sport Cub scripts have been removed from this repository. "
+        "Use the framework 6DOF grey-box implementation or pass --results-csv "
+        "with an externally generated OEM result CSV to refresh the exported row."
+    )
+
+
+def _latest_sportcub_results() -> Path:
+    candidates = sorted(METHOD_RESULTS.glob("sportcub_oem_6dof_results_*.csv"), key=lambda path: path.stat().st_mtime)
+    if not candidates:
+        raise SystemExit(
+            "sportcub-real requires --results-csv because the legacy Sport Cub "
+            "scripts and their generated OEM CSVs are no longer committed."
+        )
+    return candidates[-1]
+
+
+def _wrap_radians(values: np.ndarray) -> np.ndarray:
+    return np.arctan2(np.sin(values), np.cos(values))
+
+
+def _sportcub_result_metrics(path: Path) -> dict[str, float | int]:
+    rows = read_csv(path)
+    val_rows = [row for row in rows if row.get("split") == "val"]
+    if not val_rows:
+        raise SystemExit(f"{path} has no validation rows")
+    pos_err = np.array(
+        [
+            [
+                float(row["pN_sim"]) - float(row["pN_meas"]),
+                float(row["pE_sim"]) - float(row["pE_meas"]),
+                float(row["pD_sim"]) - float(row["pD_meas"]),
+            ]
+            for row in val_rows
+        ],
+        dtype=float,
+    )
+    att_err = _wrap_radians(
+        np.array(
+            [
+                [
+                    float(row["phi_sim_rad"]) - float(row["phi_meas_rad"]),
+                    float(row["theta_sim_rad"]) - float(row["theta_meas_rad"]),
+                    float(row["psi_sim_rad"]) - float(row["psi_meas_rad"]),
+                ]
+                for row in val_rows
+            ],
+            dtype=float,
+        )
+    )
+    train_samples = sum(1 for row in rows if row.get("split") == "train")
+    pos_rmse_axis = np.sqrt(np.mean(pos_err**2, axis=0))
+    att_rmse_axis = np.sqrt(np.mean(att_err**2, axis=0))
+    pos_rmse = float(np.sqrt(np.mean(pos_err**2)))
+    att_rmse = float(np.sqrt(np.mean(att_err**2)))
+    score = 0.5 * (pos_rmse / 1.0) + 0.5 * (att_rmse / np.deg2rad(10.0))
+    return {
+        "validation_score": score,
+        "train_samples": train_samples,
+        "validation_samples": len(val_rows),
+        "rmse_position_m": pos_rmse,
+        "rmse_mocap_position_m": pos_rmse,
+        "rmse_quaternion": att_rmse,
+        "rmse_mocap_quaternion": att_rmse,
+        "rmse_pN_m": float(pos_rmse_axis[0]),
+        "rmse_pE_m": float(pos_rmse_axis[1]),
+        "rmse_pD_m": float(pos_rmse_axis[2]),
+        "rmse_phi_rad": float(att_rmse_axis[0]),
+        "rmse_theta_rad": float(att_rmse_axis[1]),
+        "rmse_psi_rad": float(att_rmse_axis[2]),
+    }
+
+
+def export_sportcub_real(args: argparse.Namespace) -> None:
+    from datasets.registry import load_manifest, source_url
+
+    data_root = _sportcub_data_root(args)
+    if args.run_sysid:
+        _run_sportcub_sysid(args, data_root)
+    output = METHOD_RESULTS / "sportcub_mocap_4_17_26_method_comparison.csv"
+    if args.results_csv is None and output.exists():
+        web_data(argparse.Namespace())
+        print(f"Using existing {output}")
+        return
+    result_path = Path(args.results_csv) if args.results_csv is not None else _latest_sportcub_results()
+    if not result_path.is_absolute():
+        result_path = ROOT / result_path
+    result_path = result_path.resolve()
+    manifest = load_manifest(SPORTCUB_DATASET_ID)
+    metrics = _sportcub_result_metrics(result_path)
+    source = source_url(manifest) or ""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "scenario": SPORTCUB_DATASET_ID,
+        "scenario_title": manifest["title"],
+        "model_family": "aircraft6dof",
+        "method": "6DOF-GreyBoxOEM-EEMInit",
+        "description": "6DOF grey-box OEM with equation-error warm start and mocap output residuals.",
+        "implementation_status": "provisional",
+        "backend": "numpy-casadi-ipopt",
+        "state_source": "mocap",
+        "input_channel": "u_cmd",
+        "evaluation_mode": "held_out_measured_output",
+        "training_scenario": f"{SPORTCUB_DATASET_ID}_train",
+        "validation_scenario": f"{SPORTCUB_DATASET_ID}_val",
+        "train_elapsed_s": "",
+        "train_cpu_s": "",
+        "train_gpu_s": "",
+        "gpu_memory_mb": "",
+        "rollout_elapsed_s": "",
+        "total_elapsed_s": "",
+        "train_loss_final": "",
+        "decision_variables": 22 + 9 * 9,
+        "rmse_V": "",
+        "rmse_alpha": "",
+        "rmse_gamma": "",
+        "rmse_Q": "",
+        "rmse_velocity_mps": "",
+        "rmse_rates_rad_s": "",
+        "mocap_rmse_x_pos": metrics["rmse_pN_m"],
+        "mocap_rmse_z_pos": metrics["rmse_pD_m"],
+        "mocap_rmse_theta": metrics["rmse_theta_rad"],
+        "coeff_residual_rmse_C_L": "",
+        "coeff_residual_rmse_C_D": "",
+        "coeff_residual_rmse_C_M": "",
+        "notes": (
+            "Real Sport Cub MoCap provisional dataset; validation score is the mean of "
+            "position RMSE normalized by 1 m and Euler-angle RMSE normalized by 10 deg."
+        ),
+        "dataset_status": manifest["status"],
+        "dataset_source_url": source,
+        "source_results_csv": relative_or_absolute(result_path, ROOT),
+    }
+    row.update(metrics)
+    fieldnames = list(dict.fromkeys([*row.keys()]))
+    with output.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow(row)
+    print(f"Wrote {output}")
+    web_data(argparse.Namespace(output=ROOT / "site" / "public" / "data"))
+
+
 def rates(_args: argparse.Namespace) -> None:
-    run([sys.executable, str(METHODS / "observation_rate_study.py")])
+    run([sys.executable, str(ROOT / "observation_rate_study.py")])
 
 
 def suite_command(
     args: argparse.Namespace,
     mode: str,
     results_dir: Path = METHOD_RESULTS,
-    table_dir: Path = METHODS / "tables",
+    table_dir: Path = METHOD_TABLES,
     fig_dir: Path = METHOD_FIG,
 ) -> list[str]:
     include_methods = getattr(args, "include_methods", None)
@@ -1272,7 +1433,7 @@ def suite_command(
         train_mode = METHOD_TRAINING_MODES.get(include_methods[0], "aggressive")
     command = [
         methods_python(),
-        str(METHODS / "comparison_suite.py"),
+        str(ROOT / "comparison_suite.py"),
         "--dataset",
         str(DATASET_OUTPUTS[mode]),
         "--input-channel",
@@ -1339,7 +1500,7 @@ def suite(args: argparse.Namespace) -> None:
 
 
 def run_suite_parallel(args: argparse.Namespace, jobs: int) -> None:
-    work_root = METHODS / ".suite_work"
+    work_root = WORK / "suite"
     work_root.mkdir(parents=True, exist_ok=True)
     pending = build_suite_tasks(args)
     total_tasks = len(pending)
@@ -1561,7 +1722,7 @@ def build_suite_tasks(args: argparse.Namespace) -> list[tuple[str, str, str]]:
 def archive_suite_outputs(
     mode: str,
     results_dir: Path = METHOD_RESULTS,
-    table_dir: Path = METHODS / "tables",
+    table_dir: Path = METHOD_TABLES,
     fig_dir: Path = METHOD_FIG,
 ) -> None:
     for filename in ARCHIVED_RESULTS:
@@ -1570,7 +1731,7 @@ def archive_suite_outputs(
             shutil.copy2(source, archived_path(mode, filename, METHOD_RESULTS))
         table_source = table_dir / filename
         if table_source.exists():
-            shutil.copy2(table_source, archived_path(mode, filename, METHODS / "tables"))
+            shutil.copy2(table_source, archived_path(mode, filename, METHOD_TABLES))
     for filename in ARCHIVED_FIGURES:
         source = fig_dir / filename
         if source.exists():
@@ -1613,7 +1774,7 @@ def archive_split_source_outputs(mode: str, source_outputs: dict[str, list[tuple
                 if table_file.exists():
                     table_rows.extend(read_csv(table_file))
         write_csv_rows(archived_path(mode, filename, METHOD_RESULTS), rows)
-        write_csv_rows(archived_path(mode, filename, METHODS / "tables"), table_rows or rows)
+        write_csv_rows(archived_path(mode, filename, METHOD_TABLES), table_rows or rows)
 
     for filename in ["shared_frequency_summary.csv", "shared_sindy_coefficients.csv", "shared_symbolic_coefficients.csv"]:
         for source in ("mocap", "direct"):
@@ -1648,9 +1809,9 @@ def restore_shared_outputs(mode: str) -> None:
         archived = archived_path(mode, filename, METHOD_RESULTS)
         if archived.exists():
             shutil.copy2(archived, METHOD_RESULTS / filename)
-        table_archived = archived_path(mode, filename, METHODS / "tables")
+        table_archived = archived_path(mode, filename, METHOD_TABLES)
         if table_archived.exists():
-            shutil.copy2(table_archived, METHODS / "tables" / filename)
+            shutil.copy2(table_archived, METHOD_TABLES / filename)
     for filename in ARCHIVED_FIGURES:
         archived = METHOD_FIG / f"{mode}_{filename}"
         if archived.exists():
@@ -1678,7 +1839,7 @@ def web_data(args: argparse.Namespace) -> None:
 
 
 def _plugin_dirs() -> list[Path]:
-    plugin_root = METHODS / "plugins"
+    plugin_root = METHOD_CODE / "plugins"
     if not plugin_root.exists():
         return []
     return sorted(path.parent for path in plugin_root.glob("*/method.json"))
@@ -1687,25 +1848,34 @@ def _plugin_dirs() -> list[Path]:
 def check_setup(_args: argparse.Namespace) -> None:
     """Run fast local checks for the website/plugin benchmark setup."""
 
-    from methods.benchmark.registry import all_method_metadata
+    from benchmark.registry import all_method_metadata
 
     py_files = [
-        "methods/benchmark/export.py",
-        "methods/benchmark/method_api.py",
-        "methods/benchmark/registry.py",
-        "methods/benchmark/smoke_plugin.py",
-        "methods/models/aircraft6dof/model.py",
-        "methods/models/aircraft6dof/comparison_suite.py",
-        "methods/models/aircraft6dof/smoke.py",
+        "benchmark/export.py",
+        "benchmark/method_api.py",
+        "benchmark/registry.py",
+        "benchmark/smoke_plugin.py",
+        "datasets/fetch.py",
+        "datasets/registry.py",
+        "datasets/validate_dataset.py",
+        "datasets/validate_format.py",
+        "datasets/synthetic_3dof/compact.py",
+        "datasets/sportcub_mocap_4_17_26/canonicalize.py",
+        "datasets/sportcub_mocap_4_17_26/process.py",
+        "models/aircraft6dof/model.py",
+        "models/aircraft6dof/comparison_suite.py",
+        "models/aircraft6dof/smoke.py",
         "results.py",
     ]
     run([sys.executable, "-m", "py_compile", *py_files])
-    registered_methods = all_method_metadata(METHODS / "plugins")
+    run([sys.executable, "-m", "datasets.validate_dataset", str(DATASETS / SPORTCUB_DATASET_ID)])
+    run([sys.executable, "-m", "datasets.validate_format", "--allow-empty"])
+    registered_methods = all_method_metadata(METHOD_CODE / "plugins")
     if not registered_methods:
         raise SystemExit("method registry is empty")
     print(f"Registered {len(registered_methods)} methods")
     for plugin_dir in _plugin_dirs():
-        run([sys.executable, "-m", "methods.benchmark.smoke_plugin", str(plugin_dir)])
+        run([sys.executable, "-m", "benchmark.smoke_plugin", str(plugin_dir)])
     web_data(argparse.Namespace(output=ROOT / "site" / "public" / "data"))
     manifest_path = ROOT / "site" / "public" / "data" / "manifest.json"
     method_results_path = ROOT / "site" / "public" / "data" / "method_results.json"
@@ -1715,7 +1885,7 @@ def check_setup(_args: argparse.Namespace) -> None:
         raise SystemExit("site manifest has no scenarios")
     if not method_results:
         raise SystemExit("site method_results.json has no method rows")
-    run([sys.executable, "-m", "models.aircraft6dof.smoke"], cwd=METHODS)
+    run([sys.executable, "-m", "models.aircraft6dof.smoke"], cwd=ROOT)
     print("Setup check passed.")
     print(f"Site data: {len(manifest['scenarios'])} scenarios, {len(method_results)} method result rows")
 
@@ -1818,6 +1988,16 @@ def parse_args() -> argparse.Namespace:
     add_shared_options(p_sim)
     p_sim.set_defaults(func=simulate)
 
+    p_compact3 = sub.add_parser("compact-3dof", help="generate an ignored compact 3DOF NPZ dataset under work/data/")
+    p_compact3.add_argument("--output", type=Path, default=WORK_DATA / "longitudinal_3dof_nonlinear_open_loop")
+    p_compact3.add_argument("--train-trials", type=int, default=64)
+    p_compact3.add_argument("--validation-trials", type=int, default=16)
+    p_compact3.add_argument("--duration", type=float, default=40.0)
+    p_compact3.add_argument("--dt", type=float, default=0.01)
+    p_compact3.add_argument("--seed", type=int, default=7)
+    p_compact3.add_argument("--dataset-mode", choices=list(DATASET_MODES), default="open_loop")
+    p_compact3.set_defaults(func=compact_3dof)
+
     p_sim6 = sub.add_parser("simulate-6dof", help="generate the 6DOF train/validation dataset")
     p_sim6.add_argument("--output", type=Path, default=None, help="single-mode output directory; ignored when multiple --dataset-modes are selected")
     p_sim6.add_argument("--train-trials", type=int, default=32)
@@ -1832,7 +2012,7 @@ def parse_args() -> argparse.Namespace:
 
     p_suite6 = sub.add_parser("suite-6dof", help="run baseline methods on the 6DOF train/validation dataset")
     p_suite6.add_argument("--dataset", type=Path, default=SIX_DOF_DATASET_OUTPUTS["aggressive"])
-    p_suite6.add_argument("--dataset-modes", nargs="+", choices=list(SIX_DOF_DATASET_MODES), default=list(SIX_DOF_DATASET_MODES), help="standard 6DOF datasets to aggregate; use --dataset-modes with no value disabled by passing --dataset through Python API only")
+    p_suite6.add_argument("--dataset-modes", nargs="+", choices=list(SIX_DOF_DATASET_MODES), default=None, help="standard generated 6DOF datasets to aggregate; omit to use --dataset")
     p_suite6.add_argument("--state-source", choices=["direct", "mocap", "both"], default="both")
     p_suite6.add_argument("--ridge", type=float, default=1e-5)
     p_suite6.add_argument("--workers", type=int, default=max(1, min(30, (os.cpu_count() or 2) - 2)))
@@ -1854,6 +2034,39 @@ def parse_args() -> argparse.Namespace:
     p_all6.add_argument("--no-plot", action="store_true")
     p_all6.add_argument("--build", action="store_true")
     p_all6.set_defaults(func=all_6dof)
+
+    p_fetch_dataset = sub.add_parser("fetch-dataset", help="download a contributed dataset payload into work/data")
+    p_fetch_dataset.add_argument("dataset_id")
+    p_fetch_dataset.add_argument("--output-dir", type=Path, default=None)
+    p_fetch_dataset.add_argument("--url", default=None, help="override the manifest URL")
+    p_fetch_dataset.set_defaults(func=fetch_dataset)
+
+    p_process_dataset = sub.add_parser("process-dataset", help="run a contributed dataset's raw-data processing pipeline")
+    p_process_dataset.add_argument("dataset_id")
+    p_process_dataset.add_argument("--data-root", type=Path, default=WORK_DATA / SPORTCUB_DATASET_ID / "raw")
+    p_process_dataset.add_argument("--steps", default="1,2,3")
+    p_process_dataset.add_argument("--only-cases", default=None)
+    p_process_dataset.add_argument("--no-plots", action="store_true")
+    p_process_dataset.set_defaults(func=process_dataset)
+
+    p_canonicalize_dataset = sub.add_parser("canonicalize-dataset", help="convert processed dataset segments to flat compact data/<dataset_id>_<split>.npz arrays")
+    p_canonicalize_dataset.add_argument("dataset_id")
+    p_canonicalize_dataset.add_argument("--data-root", type=Path, default=WORK_DATA / SPORTCUB_DATASET_ID / "raw")
+    p_canonicalize_dataset.add_argument("--output", type=Path, default=ROOT / "data")
+    p_canonicalize_dataset.set_defaults(func=canonicalize_dataset)
+
+    p_check_data = sub.add_parser("check-data", help="validate committed compact datasets under data/")
+    p_check_data.add_argument("dataset", nargs="*")
+    p_check_data.add_argument("--allow-empty", action="store_true")
+    p_check_data.set_defaults(func=check_data)
+
+    p_sportcub = sub.add_parser("sportcub-real", help="export or rerun the provisional Sport Cub real-data benchmark row")
+    p_sportcub.add_argument("--run-sysid", action="store_true", help="rerun EEM/OEM before exporting the result row")
+    p_sportcub.add_argument("--data-root", type=Path, default=None, help="processed Sport Cub data root containing case folders")
+    p_sportcub.add_argument("--results-csv", type=Path, default=None, help="specific Sport Cub OEM result CSV to summarize")
+    p_sportcub.add_argument("--skip-eem", action="store_true", help="when --run-sysid is set, skip the EEM warm-start stage")
+    p_sportcub.add_argument("--skip-oem", action="store_true", help="when --run-sysid is set, skip the OEM stage")
+    p_sportcub.set_defaults(func=export_sportcub_real)
 
     p_rates = sub.add_parser("rates", help="run the observation-rate study")
     p_rates.set_defaults(func=rates)

@@ -53,6 +53,20 @@ Every published dataset and result bundle should identify:
 - `metrics`: validation NRMSE, per-state errors, training time, validation rollout time, failure status, and run metadata
 - `provenance`: git SHA, command line, package versions, data-generation seed, and benchmark version
 
+Large contributed datasets are indexed in git but stored out-of-band. During
+early review a dataset may use a provisional Google Drive, SharePoint, Dropbox,
+or similar source URL in `work/datasets/<dataset_id>/dataset.json`; merged
+manifests must record status, source URL, expected size/checksum when known,
+license, contact, and date accessed. Maintainers should later mirror accepted
+datasets to a durable archive such as Zenodo, Purdue, OSF, Dataverse, or a
+project-owned object store and update the manifest from `provisional` to
+`archived`.
+
+Processed benchmark data should be compact enough to commit under `data/` when
+practical. Raw ROS 2 bags and large exported CSV trees remain external; dataset
+processors convert asynchronous topics onto a documented time grid and write the
+canonical binary format described in `docs/DATASET_CONTRACT.md`.
+
 ## Model Families
 
 ### 3DOF Longitudinal Aircraft
@@ -103,7 +117,7 @@ Each chunk should be reviewed and committed before moving to the next one.
    - Commit: `Add GitHub Pages deployment workflow`
 
 5. **Method plugin contract**
-   - Add `methods/benchmark/method_api.py` and a metadata schema.
+   - Add `benchmark/method_api.py` and a metadata schema.
    - Document how a contributor adds a method.
    - Add a smoke-test fixture.
    - Commit: `Add method plugin API`
@@ -114,7 +128,7 @@ Each chunk should be reviewed and committed before moving to the next one.
    - Commit: `Bridge existing methods into plugin registry`
 
 7. **3DOF model package cleanup**
-   - Move or alias current longitudinal simulator code under `methods/models/aircraft3dof/`.
+   - Move or alias current longitudinal simulator code under `models/aircraft3dof/`.
    - Keep backward-compatible imports.
    - Commit: `Package 3DOF aircraft benchmark model`
 

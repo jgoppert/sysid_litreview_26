@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from methods.benchmark.method_api import FittedMethod, MethodMetadata
+from benchmark.method_api import FittedMethod, MethodMetadata
 
 
 class ExampleLinearMethod:

@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-METHODS_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(METHODS_ROOT))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 
 from common.benchmark import PARAMETER_NAMES, STATE_LABELS, STATE_NAMES, Aircraft, initial_theta, make_cases, true_theta
 from common.metrics import aggregate_trajectory_score, percent_error, rmse

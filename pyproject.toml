@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "system-identification-benchmark"
+version = "0.1.0"
+description = "Aircraft system-identification benchmark framework."
+requires-python = ">=3.10"
+dependencies = [
+  "casadi",
+  "matplotlib",
+  "numpy",
+  "pandas",
+  "scipy",
+]
+
+[project.optional-dependencies]
+gpu = [
+  "torch",
+]
+
+[tool.setuptools]
+py-modules = [
+  "comparison_suite",
+  "observation_rate_study",
+  "results",
+  "run",
+]
+packages = [
+  "benchmark",
+  "common",
+  "datasets",
+  "datasets.sportcub_mocap_4_17_26",
+  "datasets.synthetic_3dof",
+  "models",
+  "models.aircraft3dof",
+  "models.aircraft6dof",
+  "simulation",
+]

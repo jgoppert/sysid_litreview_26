@@ -85,11 +85,13 @@ label,
 }
 
 select,
-button {
+button,
+input[type="file"] {
   font: inherit;
 }
 
-select {
+select,
+input[type="file"] {
   min-width: 320px;
   height: 38px;
   border: 1px solid var(--line);
@@ -97,6 +99,25 @@ select {
   background: var(--panel);
   color: var(--ink);
   padding: 0 12px;
+}
+
+input[type="file"] {
+  display: flex;
+  align-items: center;
+  padding: 7px 10px;
+}
+
+button {
+  height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #9fb2d0;
 }
 
 .segmented {
@@ -182,6 +203,25 @@ select {
   height: 430px;
 }
 
+.playback-panel {
+  padding-bottom: 14px;
+}
+
+.aircraft-playback {
+  width: 100%;
+  height: 380px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f4f7fb;
+}
+
+.aircraft-playback canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .axis-label,
 .tick {
   fill: var(--muted);
@@ -198,9 +238,16 @@ select {
   stroke-width: 1;
 }
 
-.two-column {
+.two-column,
+.grid-main {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.65fr);
+  gap: 18px;
+}
+
+.side-stack {
+  display: grid;
+  align-content: start;
   gap: 18px;
 }
 
@@ -249,6 +296,44 @@ td.numeric {
   font-variant-numeric: tabular-nums;
 }
 
+.upload-form {
+  display: grid;
+  gap: 12px;
+}
+
+.upload-form select,
+.upload-form input[type="file"] {
+  min-width: 0;
+  width: 100%;
+}
+
+.upload-form button {
+  justify-self: start;
+  padding: 0 18px;
+  background: #1f6feb;
+  color: #ffffff;
+  border-color: #1f6feb;
+  font-weight: 650;
+}
+
+.upload-status {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.command-output {
+  min-height: 58px;
+  overflow-x: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #f2f5f9;
+  color: #253040;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
 @media (max-width: 900px) {
   .app-header,
   .controls {
@@ -261,11 +346,13 @@ td.numeric {
   }
 
   .summary-grid,
-  .two-column {
+  .two-column,
+  .grid-main {
     grid-template-columns: 1fr;
   }
 
-  select {
+  select,
+  input[type="file"] {
     min-width: 0;
     width: 100%;
   }

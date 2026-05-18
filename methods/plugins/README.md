@@ -39,10 +39,10 @@ Validation rollouts must use only the validation initial condition and pilot-com
 Run the plugin smoke check:
 
 ```bash
-python3 -m methods.benchmark.smoke_plugin methods/plugins/example_linear
+python3 -m benchmark.smoke_plugin methods/plugins/example_linear
 ```
 
-The current paper-scale suite still dispatches existing methods through `methods/comparison_suite.py`. The plugin contract is the public interface that new methods should target as the benchmark runner is refactored.
+The current paper-scale suite still dispatches existing methods through `comparison_suite.py`. The plugin contract is the public interface that new methods should target as the benchmark runner is refactored.
 
 ## Result Generation Policy
 

@@ -48,13 +48,13 @@ jobs:
 
       - name: Install Python dependencies
         run: |
-          python3 -m venv methods/.venv
-          methods/.venv/bin/python -m pip install --upgrade pip
-          methods/.venv/bin/python -m pip install -r methods/requirements.txt
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[gpu]" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
 
       - name: Verify PyTorch CUDA
         run: |
-          methods/.venv/bin/python - <<'PY'
+          .venv/bin/python - <<'PY'
           import torch
           print("torch", torch.__version__)
           print("cuda_available", torch.cuda.is_available())
@@ -109,9 +109,9 @@ jobs:
         with:
           name: benchmark-artifacts
           path: |
-            methods/results
-            methods/tables
-            methods/fig
+            results
+            latex/tables
+            latex/fig
             site/public/data
             latex/generated
             latex/fig/generated_*

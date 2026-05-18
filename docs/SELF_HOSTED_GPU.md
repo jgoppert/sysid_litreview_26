@@ -51,8 +51,8 @@ The `.github/workflows/benchmark-self-hosted.yml` workflow runs only when manual
 
 - checks out the repository,
 - verifies `nvidia-smi`,
-- creates or refreshes `methods/.venv`,
-- installs `methods/requirements.txt` with CUDA PyTorch wheels,
+- creates or refreshes `.venv`,
+- installs the project with the `gpu` extra from `pyproject.toml`, using the CUDA PyTorch wheel index,
 - optionally regenerates datasets,
 - runs the benchmark suite with `--device cuda`,
 - regenerates LaTeX and website data assets,
@@ -74,9 +74,9 @@ Those match the current local workstation assumptions: high CPU parallelism, one
 Before using GitHub Actions, run this directly:
 
 ```bash
-python3 -m venv methods/.venv
-methods/.venv/bin/python -m pip install --upgrade pip
-methods/.venv/bin/python -m pip install -r methods/requirements.txt
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -e ".[gpu]" --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
 ./results.py suite --device cuda --jobs 30 --threads-per-worker 1 --max-gpu-workers 2 --input-channel u_cmd
 ./results.py latex-assets
 ./results.py web-data
@@ -85,7 +85,7 @@ methods/.venv/bin/python -m pip install -r methods/requirements.txt
 If GPU use is not visible in `nvidia-smi`, check:
 
 ```bash
-methods/.venv/bin/python - <<'PY'
+.venv/bin/python - <<'PY'
 import torch
 print(torch.__version__)
 print(torch.cuda.is_available())
@@ -102,4 +102,4 @@ PY
 
 ## Updating the Public Site
 
-After a trusted self-hosted benchmark run updates `methods/results` and `site/public/data`, commit those changes and push to `main`. The normal Pages workflow then publishes the static site.
+After a trusted self-hosted benchmark run updates `results` and `site/public/data`, commit those changes and push to `main`. The normal Pages workflow then publishes the static site.

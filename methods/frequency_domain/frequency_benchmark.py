@@ -18,8 +18,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import coherence, csd, welch
 
-METHODS_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(METHODS_ROOT))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 
 from common.benchmark import make_frequency_case
 from common.paths import FIG_DIR, RESULTS_DIR

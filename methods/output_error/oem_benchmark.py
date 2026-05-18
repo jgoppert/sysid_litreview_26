@@ -23,8 +23,8 @@ from scipy.optimize import least_squares
 
 
 METHOD_DIR = Path(__file__).resolve().parent
-ROOT = METHOD_DIR.parent
-FIG_DIR = ROOT / "fig"
+ROOT = METHOD_DIR.parents[1]
+FIG_DIR = ROOT / "latex" / "fig"
 RESULTS_DIR = ROOT / "results"
 PARAMETER_NAMES = [
     "C_L0",

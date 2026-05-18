@@ -21,9 +21,9 @@ The PR should include:
 The PR should not include regenerated benchmark results, paper figures, or website data. In particular, contributors should avoid editing:
 
 ```text
-methods/results/
-methods/tables/
-methods/fig/
+results/
+latex/tables/
+latex/fig/
 latex/generated/
 latex/fig/generated_*
 site/public/data/
@@ -34,7 +34,7 @@ GitHub-hosted CI only runs lightweight checks:
 - Python syntax checks for benchmark API files
 - plugin metadata validation
 - plugin import validation
-- smoke validation through `python3 -m methods.benchmark.smoke_plugin`
+- smoke validation through `python3 -m benchmark.smoke_plugin`
 
 These checks are intentionally CPU-only and do not run the full benchmark suite.
 
@@ -60,7 +60,7 @@ python3 latex/paper.py build
 Then review the changed result files, figures, website data, and paper output. If the results are acceptable, commit them separately:
 
 ```bash
-git add methods/results methods/tables methods/fig latex/generated latex/fig site/public/data latex/main.pdf
+git add results latex/tables latex/fig latex/generated site/public/data latex/main.pdf
 git commit -m "Update benchmark results for <method-name>"
 git push
 ```

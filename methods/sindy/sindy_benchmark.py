@@ -14,8 +14,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.signal import savgol_filter
 
-METHODS_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(METHODS_ROOT))
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
 
 from common.benchmark import STATE_LABELS, STATE_NAMES, Aircraft, TestCase, make_cases, make_validation_case
 from common.metrics import aggregate_trajectory_score, finite_difference_derivative, rmse

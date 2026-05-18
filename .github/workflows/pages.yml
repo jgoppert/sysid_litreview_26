@@ -1,8 +1,9 @@
 name: Pages
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -11,26 +12,40 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.workflow_run.conclusion == 'success' &&
+        (
+          github.event.workflow_run.event == 'push' ||
+          github.event.workflow_run.event == 'workflow_dispatch'
+        )
+      )
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install export dependency
-        run: python -m pip install numpy
+      - name: Install export dependencies
+        run: python -m pip install -e .
 
       - name: Export benchmark data
         run: ./results.py web-data
+
+      - name: Validate site
+        run: python3 site/check_site.py
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

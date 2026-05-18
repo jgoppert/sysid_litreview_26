@@ -1,0 +1,32 @@
+{
+  "id": "sportcub_mocap_4_17_26",
+  "title": "Sport Cub S 2 motion-capture 6DOF dataset, 2026-04-17",
+  "status": "provisional",
+  "model_family": "aircraft6dof",
+  "source_type": "real_mocap",
+  "observation_type": "mocap_position_attitude",
+  "sample_rate_hz": 100,
+  "collection_date": "2026-04-17",
+  "airframe": "HobbyZone Sport Cub S 2",
+  "inputs": ["aileron", "elevator", "throttle", "rudder"],
+  "outputs": ["position_enu", "quaternion_wxyz"],
+  "temporary_source": {
+    "url": "https://purdue0-my.sharepoint.com/:f:/g/personal/bansa171_purdue_edu/IgBwkBCsF9-5QK8lq7D4cQtDAS_URbpbvCmp_aWQzZYHBPQ?email=jgoppert%40purdue.edu&e=gGUQKz",
+    "provider": "purdue_sharepoint",
+    "accessed_utc": "2026-05-18",
+    "sha256": null,
+    "bytes": null,
+    "provided_by": "student contribution on real_data branch"
+  },
+  "canonical_archive": null,
+  "local_data_dir": "data",
+  "local_data_files": {
+    "train": "data/sportcub_mocap_4_17_26_train.npz",
+    "validation": "data/sportcub_mocap_4_17_26_validation.npz"
+  },
+  "processing": {
+    "script": "sport_cub_processing/v3_sportcub_pipeline.py",
+    "step3_segments": "Sports_Cub_Data_17April/<case>/step3_segments/<class>/*.csv"
+  },
+  "notes": "Personal/institutional cloud URL is accepted only as a provisional source. Mirror to Zenodo, Purdue, or another durable archive before treating this as canonical."
+}
