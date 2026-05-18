@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 import time
 from dataclasses import dataclass, replace
@@ -33,6 +34,7 @@ AERO_COEFFICIENT_NAMES = ["CL", "CD", "Cm"]
 COEFF_NAMES = ["C_L", "C_D", "C_M"]
 PARAMETER_NAMES = ["C_L0", "C_L_alpha", "C_D0", "k", "C_M0", "C_M_alpha", "C_M_Q", "C_M_delta_e"]
 STATE_LABELS = [r"$V$ [m/s]", r"$\alpha$ [deg]", r"$\gamma$ [deg]", r"$Q$ [deg/s]"]
+WEB_TRACE_MAX_POINTS = 100
 
 
 def default_stitch_train_dataset(dataset: Path) -> Path:
@@ -2196,6 +2198,128 @@ def summarize_results(results: list[MethodResult], validation: SplitData) -> lis
     return rows
 
 
+def dataset_scenario_id(dataset: Path) -> str:
+    metadata = dataset / "metadata.json"
+    if metadata.exists():
+        try:
+            payload = json.loads(metadata.read_text())
+            mode = payload.get("dataset_mode") or payload.get("config", {}).get("dataset_mode")
+            if mode:
+                return str(mode)
+        except json.JSONDecodeError:
+            pass
+    name = dataset.name
+    if name == "longitudinal_3dof_nonlinear":
+        return "aggressive"
+    for candidate in (
+        "open_loop_safe",
+        "sine_sweep_safe",
+        "aggressive_safe",
+        "safe_loop",
+        "proprietary_autopilot",
+        "open_loop",
+        "sine_sweep",
+        "trim_grid",
+        "aggressive",
+    ):
+        if candidate in name:
+            return candidate
+    return "aggressive"
+
+
+def quat_wxyz_from_rotation(matrix: np.ndarray) -> np.ndarray:
+    trace = float(np.trace(matrix))
+    if trace > 0.0:
+        scale = np.sqrt(trace + 1.0) * 2.0
+        quat = np.array(
+            [
+                0.25 * scale,
+                (matrix[2, 1] - matrix[1, 2]) / scale,
+                (matrix[0, 2] - matrix[2, 0]) / scale,
+                (matrix[1, 0] - matrix[0, 1]) / scale,
+            ]
+        )
+    else:
+        axis = int(np.argmax(np.diag(matrix)))
+        if axis == 0:
+            scale = np.sqrt(1.0 + matrix[0, 0] - matrix[1, 1] - matrix[2, 2]) * 2.0
+            quat = np.array(
+                [
+                    (matrix[2, 1] - matrix[1, 2]) / scale,
+                    0.25 * scale,
+                    (matrix[0, 1] + matrix[1, 0]) / scale,
+                    (matrix[0, 2] + matrix[2, 0]) / scale,
+                ]
+            )
+        elif axis == 1:
+            scale = np.sqrt(1.0 + matrix[1, 1] - matrix[0, 0] - matrix[2, 2]) * 2.0
+            quat = np.array(
+                [
+                    (matrix[0, 2] - matrix[2, 0]) / scale,
+                    (matrix[0, 1] + matrix[1, 0]) / scale,
+                    0.25 * scale,
+                    (matrix[1, 2] + matrix[2, 1]) / scale,
+                ]
+            )
+        else:
+            scale = np.sqrt(1.0 + matrix[2, 2] - matrix[0, 0] - matrix[1, 1]) * 2.0
+            quat = np.array(
+                [
+                    (matrix[1, 0] - matrix[0, 1]) / scale,
+                    (matrix[0, 2] + matrix[2, 0]) / scale,
+                    (matrix[1, 2] + matrix[2, 1]) / scale,
+                    0.25 * scale,
+                ]
+            )
+    return quat / max(float(np.linalg.norm(quat)), 1e-12)
+
+
+def planar_body_to_enu_quat(theta: np.ndarray) -> np.ndarray:
+    quat = np.empty((len(theta), 4), dtype=float)
+    for index, pitch in enumerate(theta):
+        forward = np.array([np.cos(pitch), 0.0, np.sin(pitch)])
+        right = np.array([0.0, -1.0, 0.0])
+        down = np.cross(forward, right)
+        quat[index] = quat_wxyz_from_rotation(np.column_stack([forward, right, down]))
+    return quat
+
+
+def trace_segment_3dof(t: np.ndarray, x: np.ndarray, u: np.ndarray, name: str) -> dict[str, object]:
+    stride = max(1, int(np.ceil(len(t) / WEB_TRACE_MAX_POINTS)))
+    t = t[::stride]
+    x = x[::stride]
+    u = u[::stride]
+    mocap = mocap_from_state(t, x)
+    position = np.column_stack([mocap[:, 0], np.zeros(len(mocap)), mocap[:, 1]])
+    control = np.column_stack([u[:, 0], np.zeros(len(u)), u[:, 1], np.zeros(len(u))])
+    return {
+        "name": name,
+        "time_s": np.round(t - t[0], 4).tolist(),
+        "position_enu_m": np.round(position - position[0], 5).tolist(),
+        "quaternion_wxyz": np.round(planar_body_to_enu_quat(mocap[:, 2]), 7).tolist(),
+        "control_meas": np.round(control, 5).tolist(),
+        "direct_state_meas": np.round(x, 6).tolist(),
+    }
+
+
+def write_method_traces(results: list[MethodResult], validation: SplitData, scenario: str, source: str) -> None:
+    traces: list[dict[str, object]] = []
+    for result in results:
+        segments = [
+            trace_segment_3dof(validation.t, result.validation_trajectories[0], validation.u_act[0], "validation_trial_1")
+        ]
+        traces.append(
+            {
+                "method": result.name,
+                "model_family": "aircraft3dof",
+                "scenario": scenario,
+                "state_source": source,
+                "segments": segments,
+            }
+        )
+    (RESULTS_DIR / "shared_method_traces.json").write_text(json.dumps({"traces": traces}, indent=2, sort_keys=True) + "\n")
+
+
 def write_rows(rows: list[dict[str, object]]) -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     TABLE_DIR.mkdir(parents=True, exist_ok=True)
@@ -2562,6 +2686,7 @@ def main() -> int:
     last_sindy_coeff: np.ndarray | None = None
     last_symbolic_names: list[str] | None = None
     last_symbolic_coeff: np.ndarray | None = None
+    trace_rows: list[dict[str, object]] = []
     def wants(method_name: str) -> bool:
         return "all" in include_methods or method_name in include_methods
 
@@ -2693,6 +2818,9 @@ def main() -> int:
             histories[f"{source}_nn_coeff_surrogate"] = surrogate_history
 
         rows = summarize_results(results, validation)
+        write_method_traces(results, validation, dataset_scenario_id(args.dataset), source)
+        trace_payload = json.loads((RESULTS_DIR / "shared_method_traces.json").read_text())
+        trace_rows.extend(trace_payload.get("traces", []))
         for row in rows:
             row["input_channel"] = args.input_channel
         if args.state_source == "both" or source != "direct":
@@ -2711,6 +2839,8 @@ def main() -> int:
 
     if all_rows:
         write_rows(all_rows)
+    if trace_rows:
+        (RESULTS_DIR / "shared_method_traces.json").write_text(json.dumps({"traces": trace_rows}, indent=2, sort_keys=True) + "\n")
     if last_sindy_names is not None and last_sindy_coeff is not None:
         write_sindy_coefficients(last_sindy_names, last_sindy_coeff)
     if last_symbolic_names is not None and last_symbolic_coeff is not None:

@@ -15,6 +15,7 @@ const state = {
   playbackLastMs: null,
   playbackScrubbing: false,
   playbackSegmentIndex: 0,
+  playbackView: "animation",
   selectedMethods: new Set(),
   modelFamily: "aircraft3dof",
   scenario: "",
@@ -42,7 +43,7 @@ function clamp(value, min, max) {
 }
 
 function cleanMethodName(method) {
-  return String(method || "").replace(" (mocap)", "");
+  return String(method || "").replace(" (mocap)", "").replace(" (direct)", "");
 }
 
 function slug(value) {
@@ -212,6 +213,14 @@ function bindControls() {
     render();
   });
 
+  document.querySelector("#playback-tabs").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-playback-view]");
+    if (!button) return;
+    state.playbackView = button.dataset.playbackView;
+    renderPlaybackTabs();
+    if (state.playbackView === "animation") resizePlayback();
+  });
+
   document.querySelector("#upload-run").addEventListener("click", analyzeUpload);
   document.querySelector("#method-command").addEventListener("click", renderMethodCommand);
   document.querySelector("#simulate-command").addEventListener("click", renderSimCommand);
@@ -255,6 +264,16 @@ function renderMeta() {
   const sha = state.manifest.git_sha ? state.manifest.git_sha.slice(0, 7) : "unknown";
   const generated = new Date(state.manifest.generated_at).toLocaleString();
   document.querySelector("#run-meta").textContent = `schema ${state.manifest.schema_version} | ${sha} | ${generated}`;
+}
+
+function renderPlaybackTabs() {
+  document.querySelectorAll("#playback-tabs button[data-playback-view]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.playbackView === state.playbackView);
+  });
+  const animation = document.querySelector("#animation-view");
+  const history = document.querySelector("#history-view");
+  if (animation) animation.hidden = state.playbackView !== "animation";
+  if (history) history.hidden = state.playbackView !== "history";
 }
 
 function renderSummary(rows) {
@@ -331,7 +350,7 @@ function renderTradeoff(rows) {
 
   add("rect", { x: margin.left, y: margin.top, width: plotWidth, height: plotHeight, fill: "none", stroke: "var(--line)" });
   add("text", { x: margin.left + plotWidth / 2, y: height - 8, "text-anchor": "middle", class: "axis-label" }, "training time [s]");
-  add("text", { x: 18, y: margin.top + plotHeight / 2, transform: `rotate(-90 18 ${margin.top + plotHeight / 2})`, "text-anchor": "middle", class: "axis-label" }, "validation score");
+  add("text", { x: 18, y: margin.top + plotHeight / 2, transform: `rotate(-90 18 ${margin.top + plotHeight / 2})`, "text-anchor": "middle", class: "axis-label" }, "validation score (lower is better)");
 
   const nominal = rows.find((row) => cleanMethodName(row.method).includes("Nominal") && finiteNumber(row.validation_score));
   if (nominal) {
@@ -485,6 +504,26 @@ function attitudeToThree(quaternionWxyz) {
   return ENU_TO_THREE_QUAT.clone().multiply(bodyToEnu).multiply(MESH_TO_BODY_FRD_QUAT).normalize();
 }
 
+function quaternionToEulerDeg(quaternionWxyz) {
+  if (!quaternionWxyz?.length) return [0, 0, 0];
+  const q = new THREE.Quaternion(
+    quaternionWxyz[1],
+    quaternionWxyz[2],
+    quaternionWxyz[3],
+    quaternionWxyz[0],
+  ).normalize();
+  const matrix = new THREE.Matrix4().makeRotationFromQuaternion(q).elements;
+  const forward = new THREE.Vector3(matrix[0], matrix[1], matrix[2]).normalize();
+  const right = new THREE.Vector3(matrix[4], matrix[5], matrix[6]).normalize();
+  const pitch = Math.asin(clamp(forward.z, -1, 1));
+  const yaw = Math.atan2(forward.y, forward.x);
+  const rightLevel = new THREE.Vector3(Math.sin(yaw), -Math.cos(yaw), 0).normalize();
+  const downLevel = new THREE.Vector3().crossVectors(forward, rightLevel).normalize();
+  const roll = Math.atan2(right.dot(downLevel), right.dot(rightLevel));
+  const radToDeg = 180 / Math.PI;
+  return [roll * radToDeg, pitch * radToDeg, yaw * radToDeg];
+}
+
 function playbackDuration(trackOrSegment) {
   const segment = trackOrSegment?.segments ? activeSegment(trackOrSegment) : trackOrSegment;
   return Math.max(segment?.time_s?.at(-1) || 1, 1);
@@ -502,7 +541,7 @@ function makeAircraftMesh() {
   const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x2f5f9f, roughness: 0.46, metalness: 0.08 });
   const wingMaterial = new THREE.MeshStandardMaterial({ color: 0xd9e2ef, roughness: 0.55, metalness: 0.04 });
   const accentMaterial = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.5, metalness: 0.02 });
-  const controlMaterial = new THREE.MeshStandardMaterial({ color: 0x7aa2d6, roughness: 0.5, metalness: 0.03 });
+  const controlMaterial = new THREE.MeshStandardMaterial({ color: 0xff8a1f, roughness: 0.42, metalness: 0.02 });
   const propMaterial = new THREE.MeshStandardMaterial({ color: 0x2b3442, roughness: 0.35, metalness: 0.08 });
   const propDiskMaterial = new THREE.MeshBasicMaterial({ color: 0x7fb4ff, transparent: true, opacity: 0.16, side: THREE.DoubleSide });
 
@@ -522,24 +561,24 @@ function makeAircraftMesh() {
   rightWing.position.set(0.02, 0, 0.64);
   group.add(rightWing);
 
-  const leftAileron = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.025, 0.34), controlMaterial);
-  leftAileron.position.set(-0.08, -0.002, -0.72);
+  const leftAileron = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.05, 0.72), controlMaterial);
+  leftAileron.position.set(-0.18, -0.01, -0.8);
   group.add(leftAileron);
-  const rightAileron = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.025, 0.34), controlMaterial);
-  rightAileron.position.set(-0.08, -0.002, 0.72);
+  const rightAileron = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.05, 0.72), controlMaterial);
+  rightAileron.position.set(-0.18, -0.01, 0.8);
   group.add(rightAileron);
 
   const tail = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.03, 0.42), wingMaterial);
   tail.position.x = -0.58;
   group.add(tail);
-  const elevator = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.025, 0.52), controlMaterial);
-  elevator.position.set(-0.68, 0, 0);
+  const elevator = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.95), controlMaterial);
+  elevator.position.set(-0.78, -0.008, 0);
   group.add(elevator);
   const fin = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.3, 0.035), accentMaterial);
   fin.position.set(-0.56, 0.18, 0);
   group.add(fin);
-  const rudder = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.26, 0.03), controlMaterial);
-  rudder.position.set(-0.65, 0.17, 0);
+  const rudder = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.52, 0.06), controlMaterial);
+  rudder.position.set(-0.74, 0.25, 0);
   group.add(rudder);
 
   const prop = new THREE.Group();
@@ -560,12 +599,40 @@ function updateAircraftControls(aircraft, controls, deltaS) {
   const aileron = clamp(controls[1] ?? 0, -1, 1);
   const elevator = clamp(controls[2] ?? 0, -1, 1);
   const rudder = clamp(controls[3] ?? 0, -1, 1);
-  if (parts.leftAileron) parts.leftAileron.rotation.z = 0.42 * aileron;
-  if (parts.rightAileron) parts.rightAileron.rotation.z = -0.42 * aileron;
-  if (parts.elevator) parts.elevator.rotation.z = -0.46 * elevator;
-  if (parts.rudder) parts.rudder.rotation.y = 0.45 * rudder;
+  if (parts.leftAileron) parts.leftAileron.rotation.z = 0.95 * aileron;
+  if (parts.rightAileron) parts.rightAileron.rotation.z = -0.95 * aileron;
+  if (parts.elevator) parts.elevator.rotation.z = -1.0 * elevator;
+  if (parts.rudder) parts.rudder.rotation.y = 0.95 * rudder;
   if (parts.prop) parts.prop.rotation.x += deltaS * (22 + 90 * thrust);
   if (parts.propDisk) parts.propDisk.material.opacity = 0.08 + 0.22 * thrust;
+}
+
+function updateControlHud(controls) {
+  const ids = ["thrust", "aileron", "elevator", "rudder"];
+  const values = [
+    clamp(controls[0] ?? 0, 0, 1),
+    clamp(controls[1] ?? 0, -1, 1),
+    clamp(controls[2] ?? 0, -1, 1),
+    clamp(controls[3] ?? 0, -1, 1),
+  ];
+  ids.forEach((id, index) => {
+    const fill = document.querySelector(`#control-${id}`);
+    const label = document.querySelector(`#control-${id}-value`);
+    if (fill) {
+      const value = values[index];
+      if (id === "thrust") {
+        fill.style.left = "0";
+        fill.style.width = `${100 * value}%`;
+        fill.classList.remove("negative");
+      } else {
+        const magnitude = 50 * Math.abs(value);
+        fill.style.left = value < 0 ? `${50 - magnitude}%` : "50%";
+        fill.style.width = `${magnitude}%`;
+        fill.classList.toggle("negative", value < 0);
+      }
+    }
+    if (label) label.textContent = values[index].toFixed(2);
+  });
 }
 
 function disposeMaterial(material) {
@@ -632,7 +699,14 @@ function bindOrbitControls(host, playback) {
 function ensurePlaybackScene() {
   if (state.playbackScene) return state.playbackScene;
   const host = document.querySelector("#aircraft-playback");
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  } catch (_error) {
+    host.textContent = "3D playback requires WebGL. The plots and dataset comparisons are still available.";
+    host.classList.add("playback-unavailable");
+    return null;
+  }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(host.clientWidth || 900, host.clientHeight || 360);
   renderer.setClearColor(0xf4f7fb, 1);
@@ -691,6 +765,10 @@ function resizePlayback() {
 
 function setPlaybackTrack(track, force = false) {
   const playback = ensurePlaybackScene();
+  if (!playback) {
+    renderPlaybackControls(track);
+    return;
+  }
   const segment = activeSegment(track);
   const segmentName = segment?.name || "segment";
   const methodSignature = Array.from(state.selectedMethods).sort().join("|");
@@ -825,6 +903,7 @@ function tickPlayback(nowMs) {
       playback.aircraft.position.copy(sample.position);
       playback.aircraft.quaternion.copy(sample.quaternion);
       updateAircraftControls(playback.aircraft, sample.controls, deltaS);
+      updateControlHud(sample.controls);
     }
     updatePlaybackScrub(segment);
     playback.renderer.render(playback.scene, playback.camera);
@@ -905,32 +984,20 @@ function renderTimeseries() {
   const pose = segment.position_enu_m;
   const quat = segment.quaternion_wxyz || [];
   const controls = segment.control_meas || [];
-  const direct = segment.direct_state_meas || [];
+  const eulerDeg = quat.map(quaternionToEulerDeg);
   const traceSegments = selectedTraceSegments();
   const definitions = [
     ["x east", pose.map((row) => row[0]), (trace) => trace.position_enu_m?.map((row) => row[0])],
     ["y north", pose.map((row) => row[1]), (trace) => trace.position_enu_m?.map((row) => row[1])],
     ["z up", pose.map((row) => row[2]), (trace) => trace.position_enu_m?.map((row) => row[2])],
-    ["q w", quat.map((row) => row[0]), (trace) => trace.quaternion_wxyz?.map((row) => row[0])],
-    ["q x", quat.map((row) => row[1]), (trace) => trace.quaternion_wxyz?.map((row) => row[1])],
-    ["q y", quat.map((row) => row[2]), (trace) => trace.quaternion_wxyz?.map((row) => row[2])],
-    ["q z", quat.map((row) => row[3]), (trace) => trace.quaternion_wxyz?.map((row) => row[3])],
-    ["thrust", controls.map((row) => row[0] ?? 0), () => null],
-    ["aileron", controls.map((row) => row[1] ?? 0), () => null],
-    ["elevator", controls.map((row) => row[2] ?? 0), () => null],
-    ["rudder", controls.map((row) => row[3] ?? 0), () => null],
+    ["roll deg", eulerDeg.map((row) => row[0]), (trace) => trace.quaternion_wxyz?.map((row) => quaternionToEulerDeg(row)[0])],
+    ["pitch deg", eulerDeg.map((row) => row[1]), (trace) => trace.quaternion_wxyz?.map((row) => quaternionToEulerDeg(row)[1])],
+    ["yaw deg", eulerDeg.map((row) => row[2]), (trace) => trace.quaternion_wxyz?.map((row) => quaternionToEulerDeg(row)[2])],
+    ["thrust", controls.map((row) => row[0] ?? 0), (trace) => trace.control_meas?.map((row) => row[0] ?? 0)],
+    ["aileron", controls.map((row) => row[1] ?? 0), (trace) => trace.control_meas?.map((row) => row[1] ?? 0)],
+    ["elevator", controls.map((row) => row[2] ?? 0), (trace) => trace.control_meas?.map((row) => row[2] ?? 0)],
+    ["rudder", controls.map((row) => row[3] ?? 0), (trace) => trace.control_meas?.map((row) => row[3] ?? 0)],
   ].filter((item) => item[1].length);
-  const directNames = track?.direct_state_names || [];
-  if (direct.length) {
-    for (let index = 0; index < direct[0].length; index += 1) {
-      const title = directNames[index] || `state ${index + 1}`;
-      definitions.push([
-        title,
-        direct.map((row) => row[index]),
-        (trace) => trace.direct_state_meas?.map((row) => row[index]),
-      ]);
-    }
-  }
   for (const [title, values, traceAccessor] of definitions) {
     const traces = traceSegments
       .map((trace) => ({ method: trace.method, time: trace.time_s, values: traceAccessor(trace) }))
@@ -1284,6 +1351,7 @@ async function renderSimCommand() {
 
 function render() {
   setDefaultScenario();
+  renderPlaybackTabs();
   renderModelTabs();
   renderScenarioSelect();
   document.querySelector("#upload-data-family").value = state.modelFamily;

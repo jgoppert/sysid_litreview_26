@@ -73,6 +73,7 @@ ARCHIVED_FIGURES = [
 ]
 ARCHIVED_RESULTS = [
     "shared_method_comparison.csv",
+    "shared_method_traces.json",
     "shared_uq_diagnostics.csv",
     "shared_frequency_summary.csv",
     "shared_sindy_coefficients.csv",
@@ -1775,6 +1776,20 @@ def archive_split_source_outputs(mode: str, source_outputs: dict[str, list[tuple
                     table_rows.extend(read_csv(table_file))
         write_csv_rows(archived_path(mode, filename, METHOD_RESULTS), rows)
         write_csv_rows(archived_path(mode, filename, METHOD_TABLES), table_rows or rows)
+
+    trace_rows: list[dict[str, object]] = []
+    for source in ("direct", "mocap"):
+        for results_dir, _table_dir, _fig_dir in source_outputs.get(source, []):
+            trace_file = results_dir / "shared_method_traces.json"
+            if not trace_file.exists():
+                continue
+            payload = json.loads(trace_file.read_text())
+            rows = payload.get("traces", payload if isinstance(payload, list) else [])
+            trace_rows.extend(row for row in rows if isinstance(row, dict))
+    if trace_rows:
+        trace_output = archived_path(mode, "shared_method_traces.json", METHOD_RESULTS)
+        trace_output.parent.mkdir(parents=True, exist_ok=True)
+        trace_output.write_text(json.dumps({"traces": trace_rows}, indent=2, sort_keys=True) + "\n")
 
     for filename in ["shared_frequency_summary.csv", "shared_sindy_coefficients.csv", "shared_symbolic_coefficients.csv"]:
         for source in ("mocap", "direct"):

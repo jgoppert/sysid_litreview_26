@@ -158,6 +158,13 @@ def _maneuver_rows(results_dir: Path) -> list[dict[str, Any]]:
 def _generated_dataset_registry(root: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for scenario in [*SCENARIOS_3DOF, *SCENARIOS_6DOF]:
+        local_files: dict[str, str] = {}
+        train_path = scenario.default_path / "train.npz"
+        validation_path = scenario.default_path / "validation.npz"
+        if train_path.exists():
+            local_files["train"] = str(train_path.relative_to(root))
+        if validation_path.exists():
+            local_files["validation"] = str(validation_path.relative_to(root))
         rows.append(
             {
                 "id": scenario.id,
@@ -172,27 +179,75 @@ def _generated_dataset_registry(root: Path) -> list[dict[str, Any]]:
                     if scenario.model_family == MODEL_FAMILY_6DOF
                     else "datasets.synthetic_3dof.compact"
                 ),
+                "local_data_files": local_files,
                 "tags": list(scenario.tags),
             }
         )
     return rows
 
 
-def _quat_from_euler(roll: np.ndarray, pitch: np.ndarray, yaw: np.ndarray) -> np.ndarray:
-    cr = np.cos(roll / 2.0)
-    sr = np.sin(roll / 2.0)
-    cp = np.cos(pitch / 2.0)
-    sp = np.sin(pitch / 2.0)
-    cy = np.cos(yaw / 2.0)
-    sy = np.sin(yaw / 2.0)
-    return np.column_stack(
-        [
-            cr * cp * cy + sr * sp * sy,
-            sr * cp * cy - cr * sp * sy,
-            cr * sp * cy + sr * cp * sy,
-            cr * cp * sy - sr * sp * cy,
-        ]
-    )
+def _quat_wxyz_from_rotation(matrix: np.ndarray) -> np.ndarray:
+    trace = float(np.trace(matrix))
+    if trace > 0.0:
+        scale = np.sqrt(trace + 1.0) * 2.0
+        quat = np.array(
+            [
+                0.25 * scale,
+                (matrix[2, 1] - matrix[1, 2]) / scale,
+                (matrix[0, 2] - matrix[2, 0]) / scale,
+                (matrix[1, 0] - matrix[0, 1]) / scale,
+            ]
+        )
+    else:
+        axis = int(np.argmax(np.diag(matrix)))
+        if axis == 0:
+            scale = np.sqrt(1.0 + matrix[0, 0] - matrix[1, 1] - matrix[2, 2]) * 2.0
+            quat = np.array(
+                [
+                    (matrix[2, 1] - matrix[1, 2]) / scale,
+                    0.25 * scale,
+                    (matrix[0, 1] + matrix[1, 0]) / scale,
+                    (matrix[0, 2] + matrix[2, 0]) / scale,
+                ]
+            )
+        elif axis == 1:
+            scale = np.sqrt(1.0 + matrix[1, 1] - matrix[0, 0] - matrix[2, 2]) * 2.0
+            quat = np.array(
+                [
+                    (matrix[0, 2] - matrix[2, 0]) / scale,
+                    (matrix[0, 1] + matrix[1, 0]) / scale,
+                    0.25 * scale,
+                    (matrix[1, 2] + matrix[2, 1]) / scale,
+                ]
+            )
+        else:
+            scale = np.sqrt(1.0 + matrix[2, 2] - matrix[0, 0] - matrix[1, 1]) * 2.0
+            quat = np.array(
+                [
+                    (matrix[1, 0] - matrix[0, 1]) / scale,
+                    (matrix[0, 2] + matrix[2, 0]) / scale,
+                    (matrix[1, 2] + matrix[2, 1]) / scale,
+                    0.25 * scale,
+                ]
+            )
+    return quat / max(float(np.linalg.norm(quat)), 1e-12)
+
+
+def _quat_from_frd_angles(roll: np.ndarray, pitch: np.ndarray, yaw: np.ndarray) -> np.ndarray:
+    quat = np.empty((len(pitch), 4), dtype=float)
+    for index, (phi, theta, psi) in enumerate(zip(roll, pitch, yaw, strict=True)):
+        forward = np.array([np.cos(theta) * np.cos(psi), np.cos(theta) * np.sin(psi), np.sin(theta)])
+        forward /= max(float(np.linalg.norm(forward)), 1e-12)
+        right_level = np.array([np.sin(psi), -np.cos(psi), 0.0])
+        right_level /= max(float(np.linalg.norm(right_level)), 1e-12)
+        down_level = np.cross(forward, right_level)
+        down_level /= max(float(np.linalg.norm(down_level)), 1e-12)
+        right = right_level * np.cos(phi) + down_level * np.sin(phi)
+        right /= max(float(np.linalg.norm(right)), 1e-12)
+        down = np.cross(forward, right)
+        down /= max(float(np.linalg.norm(down)), 1e-12)
+        quat[index] = _quat_wxyz_from_rotation(np.column_stack([forward, right, down]))
+    return quat
 
 
 def _procedural_playback(scenario_id: str, model_family: str, title: str) -> dict[str, Any]:
@@ -222,7 +277,7 @@ def _procedural_playback(scenario_id: str, model_family: str, title: str) -> dic
         roll = np.deg2rad(8.0) * np.sin(phase)
     x = np.linspace(0.0, 12.0 if model_family == MODEL_FAMILY_6DOF else 8.0, count)
     yaw = np.arctan2(np.gradient(y), np.gradient(x))
-    quat = _quat_from_euler(roll, pitch, yaw)
+    quat = _quat_from_frd_angles(roll, pitch, yaw)
     thrust = 0.55 + 0.15 * np.sin(phase + 0.3)
     aileron = np.clip(roll / np.deg2rad(35.0), -1.0, 1.0)
     elevator = np.clip(-pitch / np.deg2rad(25.0), -1.0, 1.0)
@@ -265,7 +320,7 @@ def _segment_payload(
         quat = pose[:, 3:7]
     elif pose.shape[1] == 3:
         position = np.column_stack([pose[:, 0], np.zeros(len(pose)), pose[:, 1]])
-        quat = _quat_from_euler(np.zeros(len(pose)), pose[:, 2], np.zeros(len(pose)))
+        quat = _quat_from_frd_angles(np.zeros(len(pose)), pose[:, 2], np.zeros(len(pose)))
     else:
         return None
     position = position - position[0]
@@ -291,32 +346,53 @@ def _npz_playback(root: Path, manifest: dict[str, Any]) -> dict[str, Any] | None
     if not path.exists():
         return None
     data = np.load(path, allow_pickle=False)
-    if "pose_meas" not in data.files or "time_s" not in data.files or "valid_mask" not in data.files:
-        return None
-    valid_mask = np.asarray(data["valid_mask"], dtype=bool)
-    counts = np.sum(valid_mask, axis=1)
-    if not len(counts) or int(np.max(counts)) < 2:
-        return None
-    segment_names = _string_list(data, "segment_names", [f"segment_{index + 1}" for index in range(len(counts))])
     segments: list[dict[str, Any]] = []
-    for segment, count in enumerate(counts):
-        n = int(count)
-        if n < 2:
-            continue
-        stride = max(1, int(np.ceil(n / 240)))
-        time_s = np.asarray(data["time_s"][segment, :n], dtype=float)[::stride]
-        pose = np.asarray(data["pose_meas"][segment, :n, :], dtype=float)[::stride]
-        control = np.asarray(data["control_meas"][segment, :n, :], dtype=float)[::stride] if "control_meas" in data.files else None
-        direct_state = np.asarray(data["direct_state_meas"][segment, :n, :], dtype=float)[::stride] if "direct_state_meas" in data.files else None
-        payload = _segment_payload(
-            name=segment_names[segment] if segment < len(segment_names) else f"segment_{segment + 1}",
-            time_s=time_s,
-            pose=pose,
-            control=control,
-            direct_state=direct_state,
-        )
-        if payload is not None:
-            segments.append(payload)
+    if "pose_meas" in data.files and "time_s" in data.files and "valid_mask" in data.files:
+        valid_mask = np.asarray(data["valid_mask"], dtype=bool)
+        counts = np.sum(valid_mask, axis=1)
+        if not len(counts) or int(np.max(counts)) < 2:
+            return None
+        segment_names = _string_list(data, "segment_names", [f"segment_{index + 1}" for index in range(len(counts))])
+        for segment, count in enumerate(counts):
+            n = int(count)
+            if n < 2:
+                continue
+            stride = max(1, int(np.ceil(n / 120)))
+            time_s = np.asarray(data["time_s"][segment, :n], dtype=float)[::stride]
+            pose = np.asarray(data["pose_meas"][segment, :n, :], dtype=float)[::stride]
+            control = np.asarray(data["control_meas"][segment, :n, :], dtype=float)[::stride] if "control_meas" in data.files else None
+            direct_state = np.asarray(data["direct_state_meas"][segment, :n, :], dtype=float)[::stride] if "direct_state_meas" in data.files else None
+            payload = _segment_payload(
+                name=segment_names[segment] if segment < len(segment_names) else f"segment_{segment + 1}",
+                time_s=time_s,
+                pose=pose,
+                control=control,
+                direct_state=direct_state,
+            )
+            if payload is not None:
+                segments.append(payload)
+    elif "mocap_meas" in data.files and "t" in data.files:
+        time = np.asarray(data["t"], dtype=float)
+        mocap = np.asarray(data["mocap_meas"], dtype=float)
+        controls_2d = np.asarray(data["u_act" if "u_act" in data.files else "u_cmd"], dtype=float) if {"u_act", "u_cmd"} & set(data.files) else None
+        direct_state = np.asarray(data["y_meas" if "y_meas" in data.files else "x_true"], dtype=float) if {"y_meas", "x_true"} & set(data.files) else None
+        for segment in range(mocap.shape[0]):
+            stride = max(1, int(np.ceil(len(time) / 120)))
+            control = None
+            if controls_2d is not None:
+                u = controls_2d[segment, :, :][::stride]
+                control = np.column_stack([u[:, 0], np.zeros(len(u)), u[:, 1], np.zeros(len(u))])
+            payload = _segment_payload(
+                name=f"validation_trial_{segment + 1}",
+                time_s=time[::stride],
+                pose=mocap[segment, :, :][::stride],
+                control=control,
+                direct_state=direct_state[segment, :, :][::stride] if direct_state is not None else None,
+            )
+            if payload is not None:
+                segments.append(payload)
+    else:
+        return None
     if not segments:
         return None
     return {
@@ -333,13 +409,15 @@ def _npz_playback(root: Path, manifest: dict[str, Any]) -> dict[str, Any] | None
 
 
 def _playback_registry(root: Path, dataset_manifests: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    actual_tracks: dict[str, dict[str, Any]] = {}
     playback: list[dict[str, Any]] = []
-    for scenario in [*SCENARIOS_3DOF, *SCENARIOS_6DOF]:
-        playback.append(_procedural_playback(scenario.id, scenario.model_family, scenario.title))
     for manifest in dataset_manifests:
         track = _npz_playback(root, manifest)
         if track is not None:
-            playback.append(track)
+            actual_tracks[track["id"]] = track
+    for scenario in [*SCENARIOS_3DOF, *SCENARIOS_6DOF]:
+        playback.append(actual_tracks.pop(scenario.id, None) or _procedural_playback(scenario.id, scenario.model_family, scenario.title))
+    playback.extend(actual_tracks.values())
     return playback
 
 

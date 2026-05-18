@@ -44,7 +44,7 @@
           <strong id="best-method">--</strong>
         </div>
         <div class="metric">
-          <span>Best score</span>
+          <span>Best validation score</span>
           <strong id="best-score">--</strong>
         </div>
         <div class="metric">
@@ -62,45 +62,60 @@
           <h2>Aircraft Playback</h2>
           <p id="playback-status">Loading trajectory...</p>
         </div>
-        <div id="aircraft-playback" class="aircraft-playback" aria-label="Animated aircraft state playback"></div>
-        <div class="playback-controls" aria-label="Playback controls">
-          <button type="button" id="playback-rewind" aria-label="Rewind"><<</button>
-          <button type="button" id="playback-toggle" aria-label="Pause">||</button>
-          <button type="button" id="playback-forward" aria-label="Fast forward">>></button>
-          <label class="scrub-label">
-            Time
-            <input id="playback-scrub" type="range" min="0" max="1" step="0.001" value="0">
-          </label>
-          <label class="segment-label">
-            Flight
-            <select id="playback-segment"></select>
-          </label>
-          <label class="speed-label">
-            Speed
-            <select id="playback-speed">
-              <option value="0.25">0.25x</option>
-              <option value="0.5">0.5x</option>
-              <option value="1" selected>1x</option>
-              <option value="2">2x</option>
-              <option value="4">4x</option>
-            </select>
-          </label>
+        <p class="help-text">A rollout is a model-simulated trajectory from the same initial state and control inputs as the validation flight.</p>
+        <div class="view-tabs" id="playback-tabs" aria-label="Playback view">
+          <button type="button" data-playback-view="animation" class="active">Animation</button>
+          <button type="button" data-playback-view="history">Time Histories</button>
+        </div>
+        <div id="animation-view" class="playback-view">
+          <div class="playback-stage">
+            <div id="aircraft-playback" class="aircraft-playback" aria-label="Animated aircraft state playback"></div>
+            <div class="control-hud" aria-label="Control inputs">
+              <div><span>Thrust</span><span class="control-bar thrust"><span id="control-thrust" class="control-fill"></span></span><b id="control-thrust-value">0.00</b></div>
+              <div><span>Aileron</span><span class="control-bar signed"><span id="control-aileron" class="control-fill"></span></span><b id="control-aileron-value">0.00</b></div>
+              <div><span>Elevator</span><span class="control-bar signed"><span id="control-elevator" class="control-fill"></span></span><b id="control-elevator-value">0.00</b></div>
+              <div><span>Rudder</span><span class="control-bar signed"><span id="control-rudder" class="control-fill"></span></span><b id="control-rudder-value">0.00</b></div>
+            </div>
+          </div>
+          <div class="playback-controls" aria-label="Playback controls">
+            <button type="button" id="playback-rewind" aria-label="Rewind"><<</button>
+            <button type="button" id="playback-toggle" aria-label="Pause">||</button>
+            <button type="button" id="playback-forward" aria-label="Fast forward">>></button>
+            <label class="scrub-label">
+              Time
+              <input id="playback-scrub" type="range" min="0" max="1" step="0.001" value="0">
+            </label>
+            <label class="segment-label">
+              Flight
+              <select id="playback-segment"></select>
+            </label>
+            <label class="speed-label">
+              Speed
+              <select id="playback-speed">
+                <option value="0.25">0.25x</option>
+                <option value="0.5">0.5x</option>
+                <option value="1" selected>1x</option>
+                <option value="2">2x</option>
+                <option value="4">4x</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="history-view" class="playback-view" hidden>
+          <div class="panel-heading compact-heading">
+            <h2>Time Histories</h2>
+            <p id="timeseries-status">Measured pose and controls</p>
+          </div>
+          <div id="timeseries-plots" class="timeseries-grid"></div>
         </div>
       </section>
 
       <section class="panel">
         <div class="panel-heading">
           <h2>Cost-Error Tradeoff</h2>
+          <p>Validation score is held-out trajectory error; lower is better.</p>
         </div>
         <div id="tradeoff-plot" class="plot" role="img" aria-label="Training time versus validation error plot"></div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-heading">
-          <h2>Time Histories</h2>
-          <p id="timeseries-status">Measured pose and controls</p>
-        </div>
-        <div id="timeseries-plots" class="timeseries-grid"></div>
       </section>
 
       <section class="grid-main">
