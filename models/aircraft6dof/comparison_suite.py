@@ -38,6 +38,8 @@ DEFAULT_FIG = LATEX_FIG
 DEFAULT_TABLES = LATEX_TABLES
 DEFAULT_WORKERS = max(1, min(30, (os.cpu_count() or 2) - 2))
 TRADEOFF_FAILURE_THRESHOLD = 1.0
+WEB_TRACE_MAX_POINTS = 100
+WEB_TRACE_TOP_METHODS_PER_SOURCE = 8
 SCENARIO_TITLES = {
     "aircraft_6dof_open_loop": "Open-loop",
     "aircraft_6dof_sine_sweep": "Sine sweep",
@@ -1359,6 +1361,131 @@ def write_results(rows: list[dict[str, object]], path: Path) -> None:
         writer.writerows(rows)
 
 
+NED_TO_ENU = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+
+
+def quat_wxyz_from_rotation(matrix: np.ndarray) -> np.ndarray:
+    trace = float(np.trace(matrix))
+    if trace > 0.0:
+        scale = np.sqrt(trace + 1.0) * 2.0
+        quat = np.array(
+            [
+                0.25 * scale,
+                (matrix[2, 1] - matrix[1, 2]) / scale,
+                (matrix[0, 2] - matrix[2, 0]) / scale,
+                (matrix[1, 0] - matrix[0, 1]) / scale,
+            ]
+        )
+    else:
+        axis = int(np.argmax(np.diag(matrix)))
+        if axis == 0:
+            scale = np.sqrt(1.0 + matrix[0, 0] - matrix[1, 1] - matrix[2, 2]) * 2.0
+            quat = np.array(
+                [
+                    (matrix[2, 1] - matrix[1, 2]) / scale,
+                    0.25 * scale,
+                    (matrix[0, 1] + matrix[1, 0]) / scale,
+                    (matrix[0, 2] + matrix[2, 0]) / scale,
+                ]
+            )
+        elif axis == 1:
+            scale = np.sqrt(1.0 + matrix[1, 1] - matrix[0, 0] - matrix[2, 2]) * 2.0
+            quat = np.array(
+                [
+                    (matrix[0, 2] - matrix[2, 0]) / scale,
+                    (matrix[0, 1] + matrix[1, 0]) / scale,
+                    0.25 * scale,
+                    (matrix[1, 2] + matrix[2, 1]) / scale,
+                ]
+            )
+        else:
+            scale = np.sqrt(1.0 + matrix[2, 2] - matrix[0, 0] - matrix[1, 1]) * 2.0
+            quat = np.array(
+                [
+                    (matrix[1, 0] - matrix[0, 1]) / scale,
+                    (matrix[0, 2] + matrix[2, 0]) / scale,
+                    (matrix[1, 2] + matrix[2, 1]) / scale,
+                    0.25 * scale,
+                ]
+            )
+    return normalize_quaternion(quat)
+
+
+def state_segment_to_web(t: np.ndarray, x: np.ndarray, u_cmd: np.ndarray, name: str) -> dict[str, object]:
+    stride = max(1, int(np.ceil(len(t) / WEB_TRACE_MAX_POINTS)))
+    t = t[::stride]
+    x = x[::stride]
+    u_cmd = u_cmd[::stride]
+    position = np.column_stack([x[:, 1], x[:, 0], -x[:, 2]])
+    position = position - position[0]
+    quat = np.asarray([quat_wxyz_from_rotation(NED_TO_ENU @ rotation_body_to_inertial(q)) for q in x[:, 6:10]])
+    return {
+        "name": name,
+        "time_s": np.round(t - t[0], 4).tolist(),
+        "position_enu_m": np.round(position, 5).tolist(),
+        "quaternion_wxyz": np.round(quat, 7).tolist(),
+        "control_meas": np.round(u_cmd[:, [0, 2, 1, 3]], 5).tolist(),
+        "direct_state_meas": np.round(x, 6).tolist(),
+    }
+
+
+def pose_segment_to_web(t: np.ndarray, pose: np.ndarray, u_cmd: np.ndarray, name: str) -> dict[str, object]:
+    stride = max(1, int(np.ceil(len(t) / WEB_TRACE_MAX_POINTS)))
+    t = t[::stride]
+    pose = pose[::stride]
+    u_cmd = u_cmd[::stride]
+    position = pose[:, 0:3] - pose[0, 0:3]
+    return {
+        "name": name,
+        "time_s": np.round(t - t[0], 4).tolist(),
+        "position_enu_m": np.round(position, 5).tolist(),
+        "quaternion_wxyz": np.round(pose[:, 3:7], 7).tolist(),
+        "control_meas": np.round(u_cmd[:, [0, 2, 1, 3]], 5).tolist(),
+    }
+
+
+def write_method_traces(results: list[Result6DOF], validation: Split6DOF, scenario: str, path: Path) -> None:
+    traces: list[dict[str, object]] = []
+    selected_results: list[Result6DOF] = []
+    for source in sorted({result.state_source for result in results}):
+        source_results = [result for result in results if result.state_source == source and np.isfinite(result.validation_score)]
+        source_results = sorted(source_results, key=lambda result: result.validation_score)
+        keep: dict[str, Result6DOF] = {
+            result.method: result for result in source_results[:WEB_TRACE_TOP_METHODS_PER_SOURCE]
+        }
+        for result in source_results:
+            if "Nominal" in result.method:
+                keep[result.method] = result
+        selected_results.extend(keep.values())
+    segment_limit = validation.u_cmd.shape[0] if scenario == SPORTCUB_DATASET_ID else 1
+    for result in selected_results:
+        if result.x_pred is None and result.y_pred is None:
+            continue
+        if result.x_pred is not None:
+            segment_count = min(result.x_pred.shape[0], validation.u_cmd.shape[0], segment_limit)
+            segments = [
+                state_segment_to_web(validation.t, result.x_pred[index], validation.u_cmd[index], f"validation_trial_{index + 1}")
+                for index in range(segment_count)
+            ]
+        else:
+            segment_count = min(result.y_pred.shape[0], validation.u_cmd.shape[0], segment_limit)
+            segments = [
+                pose_segment_to_web(validation.t, result.y_pred[index], validation.u_cmd[index], f"validation_trial_{index + 1}")
+                for index in range(segment_count)
+            ]
+        traces.append(
+            {
+                "method": result.method,
+                "model_family": "aircraft6dof",
+                "scenario": scenario,
+                "state_source": result.state_source,
+                "segments": segments,
+            }
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"traces": traces}, indent=2, sort_keys=True) + "\n")
+
+
 def write_table(rows: list[dict[str, object]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     ordered = sorted(rows, key=lambda row: (str(row["state_source"]), str(row.get("scenario", "")), float(row["validation_score"])))
@@ -1747,7 +1874,7 @@ def main() -> int:
         active_train_splits = train_splits
         training_scenario_override = None
         dataset_train_file, dataset_validation_file = dataset_split_files(dataset)
-        if scenario not in SCENARIO_TITLES and dataset_train_file.exists():
+        if dataset_train_file.exists() and not scenario.startswith("aircraft_6dof_"):
             dataset_train = load_split(dataset_train_file)
             active_train_splits = {training_scenario: dataset_train for training_scenario in required_training}
             active_train_splits[scenario] = dataset_train
@@ -1763,6 +1890,7 @@ def main() -> int:
                 run_methods(active_train_splits, validation, source, args.ridge, args.workers, training_scenario_override)
             )
         rows.extend(result_to_row(result, scenario) for result in dataset_results)
+        write_method_traces(dataset_results, validation, scenario, args.results_dir / f"{scenario}_method_traces.json")
         if trajectory_validation is None or scenario == "aircraft_6dof_aggressive":
             trajectory_validation = validation
             trajectory_results = dataset_results

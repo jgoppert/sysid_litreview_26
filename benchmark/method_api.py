@@ -26,6 +26,7 @@ class MethodMetadata:
     observation_types: tuple[str, ...]
     training_scenarios: tuple[str, ...]
     requires_gpu: bool = False
+    heavy: bool = False
     description: str = ""
 
 
@@ -94,6 +95,7 @@ def load_method_metadata(plugin_dir: Path) -> MethodMetadata:
         observation_types=tuple(raw["observation_types"]),
         training_scenarios=tuple(raw["training_scenarios"]),
         requires_gpu=bool(raw.get("requires_gpu", False)),
+        heavy=bool(raw.get("heavy", False)),
         description=str(raw.get("description", "")),
     )
 

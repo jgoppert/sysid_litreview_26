@@ -13,7 +13,10 @@
         <p class="eyebrow">Aircraft system identification</p>
         <h1>Benchmark Results</h1>
       </div>
-      <div class="run-meta" id="run-meta">Loading benchmark data...</div>
+      <div class="header-links">
+        <a class="repo-link" href="https://github.com/jgoppert/sysid_litreview_26" target="_blank" rel="noreferrer">GitHub Repository</a>
+        <div class="run-meta" id="run-meta">Loading benchmark data...</div>
+      </div>
     </header>
 
     <main class="layout">
@@ -60,6 +63,29 @@
           <p id="playback-status">Loading trajectory...</p>
         </div>
         <div id="aircraft-playback" class="aircraft-playback" aria-label="Animated aircraft state playback"></div>
+        <div class="playback-controls" aria-label="Playback controls">
+          <button type="button" id="playback-rewind" aria-label="Rewind"><<</button>
+          <button type="button" id="playback-toggle" aria-label="Pause">||</button>
+          <button type="button" id="playback-forward" aria-label="Fast forward">>></button>
+          <label class="scrub-label">
+            Time
+            <input id="playback-scrub" type="range" min="0" max="1" step="0.001" value="0">
+          </label>
+          <label class="segment-label">
+            Flight
+            <select id="playback-segment"></select>
+          </label>
+          <label class="speed-label">
+            Speed
+            <select id="playback-speed">
+              <option value="0.25">0.25x</option>
+              <option value="0.5">0.5x</option>
+              <option value="1" selected>1x</option>
+              <option value="2">2x</option>
+              <option value="4">4x</option>
+            </select>
+          </label>
+        </div>
       </section>
 
       <section class="panel">
@@ -67,6 +93,14 @@
           <h2>Cost-Error Tradeoff</h2>
         </div>
         <div id="tradeoff-plot" class="plot" role="img" aria-label="Training time versus validation error plot"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-heading">
+          <h2>Time Histories</h2>
+          <p id="timeseries-status">Measured pose and controls</p>
+        </div>
+        <div id="timeseries-plots" class="timeseries-grid"></div>
       </section>
 
       <section class="grid-main">
@@ -119,8 +153,11 @@
                 Existing method to run
                 <select id="upload-method"></select>
               </label>
-              <button type="button" id="method-command">Run Command</button>
+              <button type="button" id="method-command">Prepare Run</button>
               <button type="button" id="simulate-command">Sim Dataset Command</button>
+              <div class="action-progress" aria-label="Action progress">
+                <span id="action-progress-bar"></span>
+              </div>
               <p id="upload-status" class="upload-status"></p>
               <pre id="command-output" class="command-output"></pre>
             </div>

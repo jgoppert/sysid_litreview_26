@@ -26,6 +26,7 @@ def main() -> int:
     method_results = load_json("method_results.json")
     load_json("maneuver_summary.json")
     playback = load_json("playback.json")
+    method_traces = load_json("method_traces.json")
     index = (ROOT / "index.html").read_text()
     app = (ROOT / "src" / "app.js").read_text()
 
@@ -41,6 +42,9 @@ def main() -> int:
         "simulate-command",
         "aircraft-playback",
         "playback-status",
+        "playback-segment",
+        "timeseries-plots",
+        "timeseries-status",
     ]:
         require(selector in index, f"missing site element #{selector}")
 
@@ -54,7 +58,9 @@ def main() -> int:
     require(any(dataset.get("source_type") == "real_mocap" for dataset in datasets), "real datasets are missing")
     require(method_results, "site has no method results")
     require(playback, "site has no playback trajectories")
+    require(isinstance(method_traces, list), "method traces bundle must be a list")
     require("three" in app.lower() and "renderPlayback" in app, "Three.js playback code is missing")
+    require("renderTimeseries" in app and "selectedTraceSegments" in app, "time-history trace code is missing")
     require("validateUploadedDataset" in app and "readNpzManifest" in app, "browser dataset validation code is missing")
     print(f"site ok: {len(scenarios)} scenarios, {len(datasets)} datasets, {len(method_results)} result rows")
     return 0

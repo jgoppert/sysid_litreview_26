@@ -223,15 +223,63 @@ def _procedural_playback(scenario_id: str, model_family: str, title: str) -> dic
     x = np.linspace(0.0, 12.0 if model_family == MODEL_FAMILY_6DOF else 8.0, count)
     yaw = np.arctan2(np.gradient(y), np.gradient(x))
     quat = _quat_from_euler(roll, pitch, yaw)
+    thrust = 0.55 + 0.15 * np.sin(phase + 0.3)
+    aileron = np.clip(roll / np.deg2rad(35.0), -1.0, 1.0)
+    elevator = np.clip(-pitch / np.deg2rad(25.0), -1.0, 1.0)
+    rudder = np.clip(0.35 * np.sin(phase + 0.8), -1.0, 1.0)
+    segment = {
+        "name": "generated_preview",
+        "time_s": np.round(time_s, 4).tolist(),
+        "position_enu_m": np.round(np.column_stack([x, y, z]), 5).tolist(),
+        "quaternion_wxyz": np.round(quat, 7).tolist(),
+        "control_meas": np.round(np.column_stack([thrust, aileron, elevator, rudder]), 5).tolist(),
+    }
     return {
         "id": scenario_id,
         "title": title,
         "model_family": model_family,
         "source": "generated_preview",
-        "time_s": np.round(time_s, 4).tolist(),
-        "position_enu_m": np.round(np.column_stack([x, y, z]), 5).tolist(),
+        "control_names": ["thrust", "aileron", "elevator", "rudder"],
+        "pose_names": ["x_e", "y_n", "z_u", "q_w", "q_x", "q_y", "q_z"],
+        "segments": [segment],
+        **{key: value for key, value in segment.items() if key != "name"},
+    }
+
+
+def _string_list(data: np.lib.npyio.NpzFile, key: str, fallback: list[str]) -> list[str]:
+    if key not in data.files:
+        return fallback
+    return [str(value) for value in np.asarray(data[key]).tolist()]
+
+
+def _segment_payload(
+    *,
+    name: str,
+    time_s: np.ndarray,
+    pose: np.ndarray,
+    control: np.ndarray | None,
+    direct_state: np.ndarray | None,
+) -> dict[str, Any] | None:
+    if pose.shape[1] == 7:
+        position = pose[:, 0:3]
+        quat = pose[:, 3:7]
+    elif pose.shape[1] == 3:
+        position = np.column_stack([pose[:, 0], np.zeros(len(pose)), pose[:, 1]])
+        quat = _quat_from_euler(np.zeros(len(pose)), pose[:, 2], np.zeros(len(pose)))
+    else:
+        return None
+    position = position - position[0]
+    payload: dict[str, Any] = {
+        "name": name,
+        "time_s": np.round(time_s - time_s[0], 4).tolist(),
+        "position_enu_m": np.round(position, 5).tolist(),
         "quaternion_wxyz": np.round(quat, 7).tolist(),
     }
+    if control is not None:
+        payload["control_meas"] = np.round(control, 5).tolist()
+    if direct_state is not None:
+        payload["direct_state_meas"] = np.round(direct_state, 6).tolist()
+    return payload
 
 
 def _npz_playback(root: Path, manifest: dict[str, Any]) -> dict[str, Any] | None:
@@ -249,30 +297,38 @@ def _npz_playback(root: Path, manifest: dict[str, Any]) -> dict[str, Any] | None
     counts = np.sum(valid_mask, axis=1)
     if not len(counts) or int(np.max(counts)) < 2:
         return None
-    segment = int(np.argmax(counts))
-    n = int(counts[segment])
-    time_s = np.asarray(data["time_s"][segment, :n], dtype=float)
-    pose = np.asarray(data["pose_meas"][segment, :n, :], dtype=float)
-    stride = max(1, int(np.ceil(n / 240)))
-    time_s = time_s[::stride]
-    pose = pose[::stride]
-    if pose.shape[1] == 7:
-        position = pose[:, 0:3]
-        quat = pose[:, 3:7]
-    elif pose.shape[1] == 3:
-        position = np.column_stack([pose[:, 0], np.zeros(len(pose)), pose[:, 1]])
-        quat = _quat_from_euler(np.zeros(len(pose)), pose[:, 2], np.zeros(len(pose)))
-    else:
+    segment_names = _string_list(data, "segment_names", [f"segment_{index + 1}" for index in range(len(counts))])
+    segments: list[dict[str, Any]] = []
+    for segment, count in enumerate(counts):
+        n = int(count)
+        if n < 2:
+            continue
+        stride = max(1, int(np.ceil(n / 240)))
+        time_s = np.asarray(data["time_s"][segment, :n], dtype=float)[::stride]
+        pose = np.asarray(data["pose_meas"][segment, :n, :], dtype=float)[::stride]
+        control = np.asarray(data["control_meas"][segment, :n, :], dtype=float)[::stride] if "control_meas" in data.files else None
+        direct_state = np.asarray(data["direct_state_meas"][segment, :n, :], dtype=float)[::stride] if "direct_state_meas" in data.files else None
+        payload = _segment_payload(
+            name=segment_names[segment] if segment < len(segment_names) else f"segment_{segment + 1}",
+            time_s=time_s,
+            pose=pose,
+            control=control,
+            direct_state=direct_state,
+        )
+        if payload is not None:
+            segments.append(payload)
+    if not segments:
         return None
-    position = position - position[0]
     return {
         "id": str(manifest.get("id")),
         "title": str(manifest.get("title") or manifest.get("id")),
         "model_family": str(manifest.get("model_family")),
         "source": "validation_npz",
-        "time_s": np.round(time_s - time_s[0], 4).tolist(),
-        "position_enu_m": np.round(position, 5).tolist(),
-        "quaternion_wxyz": np.round(quat, 7).tolist(),
+        "control_names": _string_list(data, "control_names", ["thrust", "aileron", "elevator", "rudder"]),
+        "pose_names": _string_list(data, "pose_names", ["x_e", "y_n", "z_u", "q_w", "q_x", "q_y", "q_z"]),
+        "direct_state_names": _string_list(data, "direct_state_names", []),
+        "segments": segments,
+        **{key: value for key, value in segments[0].items() if key != "name"},
     }
 
 
@@ -285,6 +341,22 @@ def _playback_registry(root: Path, dataset_manifests: list[dict[str, Any]]) -> l
         if track is not None:
             playback.append(track)
     return playback
+
+
+def _method_trace_registry(results_dir: Path) -> list[dict[str, Any]]:
+    traces: list[dict[str, Any]] = []
+    for path in sorted(results_dir.glob("*method_traces*.json")):
+        try:
+            payload = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, list):
+            traces.extend(item for item in payload if isinstance(item, dict))
+        elif isinstance(payload, dict):
+            rows = payload.get("traces")
+            if isinstance(rows, list):
+                traces.extend(item for item in rows if isinstance(item, dict))
+    return traces
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -312,6 +384,7 @@ def export_web_data(
     maneuver_rows = _maneuver_rows(results_dir)
     dataset_manifests = [*_generated_dataset_registry(root), *discover_manifests(root / "datasets")]
     playback_rows = _playback_registry(root, dataset_manifests)
+    trace_rows = _method_trace_registry(results_dir)
     generated_at = datetime.now(UTC).isoformat()
     git_sha = _git_sha(root)
     scenarios = [
@@ -363,6 +436,7 @@ def export_web_data(
             "method_results": "method_results.json",
             "maneuver_summary": "maneuver_summary.json",
             "playback": "playback.json",
+            "method_traces": "method_traces.json",
         },
         "scenarios": scenarios,
         "metric_definitions": {
@@ -374,5 +448,6 @@ def export_web_data(
     _write_json(output_dir / "method_results.json", method_rows)
     _write_json(output_dir / "maneuver_summary.json", maneuver_rows)
     _write_json(output_dir / "playback.json", playback_rows)
+    _write_json(output_dir / "method_traces.json", trace_rows)
     _write_json(output_dir / "manifest.json", manifest)
     return manifest

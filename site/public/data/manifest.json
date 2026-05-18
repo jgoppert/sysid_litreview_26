@@ -184,14 +184,16 @@
   "files": {
     "maneuver_summary": "maneuver_summary.json",
     "method_results": "method_results.json",
+    "method_traces": "method_traces.json",
     "playback": "playback.json"
   },
-  "generated_at": "2026-05-18T19:48:36.908409+00:00",
-  "git_sha": "b22c0f2326c3f967a6ff91c550ce21ffa72a6a7b",
+  "generated_at": "2026-05-18T20:34:57.889670+00:00",
+  "git_sha": "3bcdaf37ed8c7c36c1097c47f6e908103d76caf2",
   "method_registry": [
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -211,6 +213,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -230,6 +233,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -249,6 +253,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -268,6 +273,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -287,6 +293,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft6dof"
       ],
@@ -306,6 +313,7 @@
     {
       "description": "6DOF grey-box OEM method using the framework-owned Sport Cub model specification.",
       "entry_point": "models.aircraft6dof.greybox:main",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -321,6 +329,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft6dof"
       ],
@@ -340,6 +349,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -359,6 +369,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -378,6 +389,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft6dof"
       ],
@@ -386,7 +398,7 @@
         "direct",
         "mocap"
       ],
-      "requires_gpu": false,
+      "requires_gpu": true,
       "training_scenarios": [
         "aircraft_6dof_open_loop",
         "aircraft_6dof_sine_sweep",
@@ -397,6 +409,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -416,6 +429,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -434,6 +448,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -453,6 +468,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft6dof"
       ],
@@ -461,7 +477,7 @@
         "direct",
         "mocap"
       ],
-      "requires_gpu": false,
+      "requires_gpu": true,
       "training_scenarios": [
         "aircraft_6dof_open_loop",
         "aircraft_6dof_sine_sweep",
@@ -472,6 +488,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -491,6 +508,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -510,6 +528,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -529,6 +548,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft6dof"
       ],
@@ -548,6 +568,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft6dof"
       ],
@@ -556,7 +577,7 @@
         "direct",
         "mocap"
       ],
-      "requires_gpu": false,
+      "requires_gpu": true,
       "training_scenarios": [
         "aircraft_6dof_open_loop",
         "aircraft_6dof_sine_sweep",
@@ -567,6 +588,7 @@
     {
       "description": "Built-in 6DOF baseline dispatched by models/aircraft6dof/comparison_suite.py.",
       "entry_point": "models.aircraft6dof.comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft6dof"
       ],
@@ -586,6 +608,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -602,6 +625,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -618,6 +642,7 @@
     {
       "description": "Minimal contributor example for the benchmark plugin API.",
       "entry_point": "method:ExampleLinearMethod",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -633,6 +658,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -649,6 +675,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -665,6 +692,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -681,6 +709,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft3dof"
       ],
@@ -697,6 +726,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -713,6 +743,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -729,6 +760,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -745,6 +777,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft3dof"
       ],
@@ -761,6 +794,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -777,6 +811,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -793,6 +828,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -808,6 +844,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -824,6 +861,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft3dof"
       ],
@@ -840,6 +878,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft3dof"
       ],
@@ -856,6 +895,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -872,6 +912,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -888,6 +929,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -904,6 +946,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft3dof"
       ],
@@ -920,6 +963,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": true,
       "model_families": [
         "aircraft3dof"
       ],
@@ -936,6 +980,7 @@
     {
       "description": "Built-in method currently dispatched by comparison_suite.py.",
       "entry_point": "comparison_suite:builtin",
+      "heavy": false,
       "model_families": [
         "aircraft3dof"
       ],
@@ -1009,25 +1054,25 @@
     },
     {
       "id": "aircraft_6dof_open_loop",
-      "method_result_count": 0,
+      "method_result_count": 39,
       "model_family": "aircraft6dof",
       "title": "6-DOF open-loop maneuver"
     },
     {
       "id": "aircraft_6dof_sine_sweep",
-      "method_result_count": 0,
+      "method_result_count": 39,
       "model_family": "aircraft6dof",
       "title": "6-DOF sine-sweep maneuver"
     },
     {
       "id": "aircraft_6dof_aggressive",
-      "method_result_count": 0,
+      "method_result_count": 39,
       "model_family": "aircraft6dof",
       "title": "6-DOF aggressive nonlinear stall maneuver"
     },
     {
       "id": "aircraft_6dof_trim_grid",
-      "method_result_count": 0,
+      "method_result_count": 39,
       "model_family": "aircraft6dof",
       "title": "6-DOF local trim-grid small-deviation maneuver"
     },

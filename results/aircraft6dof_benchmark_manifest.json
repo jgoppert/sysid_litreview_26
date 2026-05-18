@@ -1,6 +1,10 @@
 {
   "datasets": [
-    "/home/jgoppert/git/system_identification/data/sportcub_mocap_4_17_26"
+    "work/data/aircraft_6dof_open_loop",
+    "work/data/aircraft_6dof_sine_sweep",
+    "work/data/aircraft_6dof_aggressive",
+    "work/data/aircraft_6dof_trim_grid",
+    "data/sportcub_mocap_4_17_26_train.npz"
   ],
   "methods": [
     "6DOF-EKF-ParamID",
@@ -26,8 +30,12 @@
   ],
   "metric": "Validation score is full-state mean NRMSE for state predictors and mocap-output NRMSE for 6DOF-OEM-MocapOutput.",
   "model_family": "aircraft6dof",
-  "result_rows": 39,
+  "result_rows": 195,
   "scenarios": [
+    "aircraft_6dof_aggressive",
+    "aircraft_6dof_open_loop",
+    "aircraft_6dof_sine_sweep",
+    "aircraft_6dof_trim_grid",
     "sportcub_mocap_4_17_26"
   ],
   "state_sources": [
@@ -35,6 +43,8 @@
     "mocap"
   ],
   "training_scenarios": [
+    "aircraft_6dof_aggressive",
+    "aircraft_6dof_trim_grid",
     "none",
     "sportcub_mocap_4_17_26"
   ]

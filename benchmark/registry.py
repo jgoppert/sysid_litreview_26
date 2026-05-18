@@ -39,12 +39,12 @@ BUILTIN_3DOF_METHOD_SPECS: tuple[MethodSpec, ...] = (
     MethodSpec("OEM-HiddenController", "aircraft3dof", "safe_loop", ("direct", "mocap")),
     MethodSpec("SINDy", "aircraft3dof", "aggressive", ("direct", "mocap")),
     MethodSpec("Symbolic-Stepwise", "aircraft3dof", "aggressive", ("direct", "mocap")),
-    MethodSpec("GP-CoeffClosure", "aircraft3dof", "aggressive", ("direct", "mocap")),
-    MethodSpec("UDE-Residual", "aircraft3dof", "aggressive", ("direct", "mocap"), requires_gpu=True),
-    MethodSpec("PINN-CoeffClosure", "aircraft3dof", "aggressive", ("direct", "mocap"), requires_gpu=True),
-    MethodSpec("UDE-HiddenControl", "aircraft3dof", "safe_loop", ("direct", "mocap"), requires_gpu=True),
-    MethodSpec("PINN-HiddenElevator", "aircraft3dof", "safe_loop", ("direct", "mocap"), requires_gpu=True),
-    MethodSpec("NN-CoeffSurrogate", "aircraft3dof", "aggressive", ("direct", "mocap"), requires_gpu=True),
+    MethodSpec("GP-CoeffClosure", "aircraft3dof", "aggressive", ("direct", "mocap"), heavy=True),
+    MethodSpec("UDE-Residual", "aircraft3dof", "aggressive", ("direct", "mocap"), requires_gpu=True, heavy=True),
+    MethodSpec("PINN-CoeffClosure", "aircraft3dof", "aggressive", ("direct", "mocap"), requires_gpu=True, heavy=True),
+    MethodSpec("UDE-HiddenControl", "aircraft3dof", "safe_loop", ("direct", "mocap"), requires_gpu=True, heavy=True),
+    MethodSpec("PINN-HiddenElevator", "aircraft3dof", "safe_loop", ("direct", "mocap"), requires_gpu=True, heavy=True),
+    MethodSpec("NN-CoeffSurrogate", "aircraft3dof", "aggressive", ("direct", "mocap"), requires_gpu=True, heavy=True),
 )
 
 BUILTIN_METHOD_TRAINING = {method.name: method.training_scenario for method in BUILTIN_3DOF_METHOD_SPECS}
@@ -92,10 +92,13 @@ def builtin_method_metadata() -> list[MethodMetadata]:
                 observation_types=method.observation_types,
                 training_scenarios=(method.training_scenario,),
                 requires_gpu=method.requires_gpu,
+                heavy=method.heavy,
                 description=method.description,
             )
         )
     for name, observation_types in SIX_DOF_BUILTINS.items():
+        requires_gpu = any(token in name for token in ("UDE", "PINN", "NN"))
+        heavy = requires_gpu or any(token in name for token in ("GP", "Koopman", "Symbolic"))
         methods.append(
             MethodMetadata(
                 name=name,
@@ -111,7 +114,8 @@ def builtin_method_metadata() -> list[MethodMetadata]:
                     if name == "6DOF-GreyBoxOEM-EEMInit"
                     else ("aircraft_6dof_open_loop", "aircraft_6dof_sine_sweep", "aircraft_6dof_aggressive", "aircraft_6dof_trim_grid")
                 ),
-                requires_gpu=False,
+                requires_gpu=requires_gpu,
+                heavy=heavy,
                 description=(
                     "6DOF grey-box OEM method using the framework-owned Sport Cub model specification."
                     if name == "6DOF-GreyBoxOEM-EEMInit"
@@ -168,6 +172,7 @@ def metadata_to_dict(method: MethodMetadata) -> dict[str, object]:
         "observation_types": list(method.observation_types),
         "training_scenarios": list(method.training_scenarios),
         "requires_gpu": method.requires_gpu,
+        "heavy": method.heavy,
         "description": method.description,
     }
 
