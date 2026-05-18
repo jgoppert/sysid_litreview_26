@@ -1434,12 +1434,14 @@ def pose_segment_to_web(t: np.ndarray, pose: np.ndarray, u_cmd: np.ndarray, name
     t = t[::stride]
     pose = pose[::stride]
     u_cmd = u_cmd[::stride]
-    position = pose[:, 0:3] - pose[0, 0:3]
+    position = np.column_stack([pose[:, 1], pose[:, 0], -pose[:, 2]])
+    position = position - position[0]
+    quat = np.asarray([quat_wxyz_from_rotation(NED_TO_ENU @ rotation_body_to_inertial(q)) for q in pose[:, 3:7]])
     return {
         "name": name,
         "time_s": np.round(t - t[0], 4).tolist(),
         "position_enu_m": np.round(position, 5).tolist(),
-        "quaternion_wxyz": np.round(pose[:, 3:7], 7).tolist(),
+        "quaternion_wxyz": np.round(quat, 7).tolist(),
         "control_meas": np.round(u_cmd[:, [0, 2, 1, 3]], 5).tolist(),
     }
 

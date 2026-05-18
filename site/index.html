@@ -62,7 +62,7 @@
           <h2>Aircraft Playback</h2>
           <p id="playback-status">Loading trajectory...</p>
         </div>
-        <p class="help-text">A rollout is a model-simulated trajectory from the same initial state and control inputs as the validation flight.</p>
+        <p class="help-text">A model trajectory, also called a rollout, is the trained model simulated from the validation flight initial condition and control inputs.</p>
         <div class="view-tabs" id="playback-tabs" aria-label="Playback view">
           <button type="button" data-playback-view="animation" class="active">Animation</button>
           <button type="button" data-playback-view="history">Time Histories</button>
@@ -130,13 +130,14 @@
                   <th>Method</th>
                   <th>Score</th>
                   <th>Train s</th>
-                  <th>Rollout s</th>
+                  <th>Model eval s</th>
                   <th>Training data</th>
                 </tr>
               </thead>
               <tbody id="leaderboard-body"></tbody>
             </table>
           </div>
+          <p class="table-note">Model eval time is the wall-clock time to simulate the trained model over the validation trajectories; it is not the flight duration.</p>
         </div>
 
         <div class="side-stack">

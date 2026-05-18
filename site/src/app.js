@@ -1004,8 +1004,8 @@ function renderTimeseries() {
       .filter((trace) => trace.values?.length === trace.time?.length);
     host.append(renderMiniSeries(title, { time, values }, traces));
   }
-  const selected = state.selectedMethods.size ? `${state.selectedMethods.size} selected method(s)` : "select methods to overlay exported rollouts";
-  const available = traceSegments.length ? "method rollouts shown" : "no exported method rollout traces for this dataset yet";
+  const selected = state.selectedMethods.size ? `${state.selectedMethods.size} selected method(s)` : "select methods to overlay exported model trajectories";
+  const available = traceSegments.length ? "model trajectories shown" : "no exported model trajectories for this dataset yet";
   status.textContent = `${segment.name || "flight"} | ${selected} | ${available}`;
 }
 
