@@ -549,6 +549,32 @@ function seekPlayback(timeS) {
   updatePlaybackScrub(segment);
 }
 
+function makeTaperedControlGeometry(chord, span, thickness, spanAxis = "z") {
+  const halfSpan = span / 2;
+  const halfThickness = thickness / 2;
+  const positions = spanAxis === "z"
+    ? [
+        0, -halfThickness, -halfSpan, 0, -halfThickness, halfSpan, 0, halfThickness, halfSpan, 0, halfThickness, -halfSpan,
+        -chord, 0, -halfSpan, -chord, 0, halfSpan,
+      ]
+    : [
+        0, -halfSpan, -halfThickness, 0, halfSpan, -halfThickness, 0, halfSpan, halfThickness, 0, -halfSpan, halfThickness,
+        -chord, -halfSpan, 0, -chord, halfSpan, 0,
+      ];
+  const indices = [
+    0, 1, 2, 0, 2, 3,
+    0, 4, 5, 0, 5, 1,
+    3, 2, 5, 3, 5, 4,
+    0, 3, 4,
+    1, 5, 2,
+  ];
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function makeAircraftMesh() {
   const group = new THREE.Group();
   const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x2f5f9f, roughness: 0.46, metalness: 0.08 });
@@ -576,14 +602,12 @@ function makeAircraftMesh() {
 
   const leftAileron = new THREE.Group();
   leftAileron.position.set(-0.14, -0.012, -0.95);
-  const leftAileronPanel = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.055, 0.78), controlMaterial);
-  leftAileronPanel.position.x = -0.16;
+  const leftAileronPanel = new THREE.Mesh(makeTaperedControlGeometry(0.32, 0.78, 0.065), controlMaterial);
   leftAileron.add(leftAileronPanel);
   group.add(leftAileron);
   const rightAileron = new THREE.Group();
   rightAileron.position.set(-0.14, -0.012, 0.95);
-  const rightAileronPanel = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.055, 0.78), controlMaterial);
-  rightAileronPanel.position.x = -0.16;
+  const rightAileronPanel = new THREE.Mesh(makeTaperedControlGeometry(0.32, 0.78, 0.065), controlMaterial);
   rightAileron.add(rightAileronPanel);
   group.add(rightAileron);
 
@@ -592,8 +616,7 @@ function makeAircraftMesh() {
   group.add(tail);
   const elevator = new THREE.Group();
   elevator.position.set(-0.82, -0.01, 0);
-  const elevatorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.055, 0.98), controlMaterial);
-  elevatorPanel.position.x = -0.15;
+  const elevatorPanel = new THREE.Mesh(makeTaperedControlGeometry(0.3, 0.98, 0.065), controlMaterial);
   elevator.add(elevatorPanel);
   group.add(elevator);
   const fin = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.54, 0.05), wingMaterial);
@@ -601,8 +624,7 @@ function makeAircraftMesh() {
   group.add(fin);
   const rudder = new THREE.Group();
   rudder.position.set(-0.84, 0.33, 0);
-  const rudderPanel = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.68, 0.07), controlMaterial);
-  rudderPanel.position.x = -0.14;
+  const rudderPanel = new THREE.Mesh(makeTaperedControlGeometry(0.28, 0.68, 0.08, "y"), controlMaterial);
   rudder.add(rudderPanel);
   group.add(rudder);
 
@@ -671,6 +693,81 @@ function disposeMaterial(material) {
 function disposeLine(line) {
   line.geometry.dispose();
   disposeMaterial(line.material);
+}
+
+function disposeObject3D(object) {
+  object.traverse((child) => {
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) {
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        if (material.map) material.map.dispose();
+        material.dispose();
+      }
+    }
+  });
+}
+
+function niceTickSpacing(size) {
+  const target = Math.max(size / 5, 1);
+  const exponent = Math.floor(Math.log10(target));
+  const fraction = target / 10 ** exponent;
+  const nice = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+  return nice * 10 ** exponent;
+}
+
+function makeAxisLabel(text, color = "#334155") {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 80;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.font = "600 28px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  ctx.fillStyle = color;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(1.6, 0.5, 1);
+  return sprite;
+}
+
+function addAxisLine(group, origin, direction, length, color, label, tickSpacing) {
+  const material = new THREE.LineBasicMaterial({ color });
+  const end = origin.clone().addScaledVector(direction, length);
+  group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([origin, end]), material));
+
+  const tickHalf = Math.max(length * 0.012, 0.08);
+  const tickMaterial = new THREE.LineBasicMaterial({ color });
+  const tickDirection = Math.abs(direction.y) > 0.5 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+  for (let tick = tickSpacing; tick < length + tickSpacing * 0.25; tick += tickSpacing) {
+    const center = origin.clone().addScaledVector(direction, Math.min(tick, length));
+    group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+      center.clone().addScaledVector(tickDirection, -tickHalf),
+      center.clone().addScaledVector(tickDirection, tickHalf),
+    ]), tickMaterial));
+    const tickLabel = makeAxisLabel(`${Math.round(tick)} m`);
+    tickLabel.position.copy(center).addScaledVector(tickDirection, tickHalf * 3);
+    tickLabel.scale.set(1.1, 0.34, 1);
+    group.add(tickLabel);
+  }
+
+  const axisLabel = makeAxisLabel(label, `#${color.toString(16).padStart(6, "0")}`);
+  axisLabel.position.copy(end).addScaledVector(direction, tickHalf * 5);
+  group.add(axisLabel);
+}
+
+function makePlaybackAxes(center, size, floorY) {
+  const group = new THREE.Group();
+  const length = Math.max(niceTickSpacing(size) * 2, Math.min(size * 0.45, 40));
+  const tickSpacing = niceTickSpacing(length);
+  const origin = new THREE.Vector3(center.x - size * 0.48, floorY + 0.04, center.z + size * 0.48);
+  addAxisLine(group, origin, new THREE.Vector3(1, 0, 0), length, 0xdc2626, "East", tickSpacing);
+  addAxisLine(group, origin, new THREE.Vector3(0, 0, -1), length, 0x16a34a, "North", tickSpacing);
+  addAxisLine(group, origin, new THREE.Vector3(0, 1, 0), Math.max(length * 0.45, tickSpacing), 0x2563eb, "Up", tickSpacing);
+  return group;
 }
 
 function updatePlaybackCamera(playback) {
@@ -754,6 +851,7 @@ function ensurePlaybackScene() {
     camera,
     aircraft,
     grid,
+    axes: null,
     trackLine: null,
     methodLines: [],
     track: null,
@@ -855,6 +953,12 @@ function setPlaybackTrack(track, force = false) {
   playback.grid.position.copy(center);
   playback.grid.position.y = Math.min(...points.map((point) => point.y));
   playback.scene.add(playback.grid);
+  if (playback.axes) {
+    playback.scene.remove(playback.axes);
+    disposeObject3D(playback.axes);
+  }
+  playback.axes = makePlaybackAxes(center, gridSize, playback.grid.position.y);
+  playback.scene.add(playback.axes);
   updatePlaybackCamera(playback);
   resizePlayback();
   renderPlaybackControls(track);
