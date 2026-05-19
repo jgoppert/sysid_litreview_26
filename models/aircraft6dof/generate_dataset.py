@@ -54,25 +54,25 @@ def _initial_state(rng: np.random.Generator, config: Aircraft6DOFConfig, mode: s
     family = _mode_family(mode)
     x0 = np.zeros(len(STATE_NAMES))
     if family == "trim_grid":
-        x0[3] = float(rng.choice([11.5, 14.5, 17.5, 20.5])) + rng.normal(0.0, 0.25)
+        x0[3] = float(rng.choice([3.5, 4.2, 5.0, 5.8])) + rng.normal(0.0, 0.08)
         alpha0 = float(rng.choice(np.deg2rad([-6.0, 0.0, 6.0, 11.0]))) + rng.normal(0.0, np.deg2rad(0.8))
         beta0 = float(rng.choice(np.deg2rad([-5.0, 0.0, 5.0]))) + rng.normal(0.0, np.deg2rad(0.6))
         euler_spread = [0.05, 0.04, 0.10]
         rate_spread = [0.06, 0.05, 0.05]
     elif family == "aggressive":
-        x0[3] = config.wing_speed + rng.normal(0.0, 3.0)
+        x0[3] = config.wing_speed + rng.normal(0.0, 0.8)
         alpha0 = rng.normal(np.deg2rad(4.0), np.deg2rad(9.0))
         beta0 = rng.normal(0.0, np.deg2rad(7.0))
         euler_spread = [0.35, 0.24, 0.45]
         rate_spread = [0.55, 0.36, 0.42]
     elif family == "sine_sweep":
-        x0[3] = config.wing_speed + rng.normal(0.0, 1.2)
+        x0[3] = config.wing_speed + rng.normal(0.0, 0.35)
         alpha0 = rng.normal(np.deg2rad(3.0), np.deg2rad(2.5))
         beta0 = rng.normal(0.0, np.deg2rad(2.0))
         euler_spread = [0.08, 0.06, 0.12]
         rate_spread = [0.08, 0.07, 0.07]
     else:
-        x0[3] = config.wing_speed + rng.normal(0.0, 0.9)
+        x0[3] = config.wing_speed + rng.normal(0.0, 0.25)
         alpha0 = rng.normal(np.deg2rad(3.0), np.deg2rad(1.8))
         beta0 = rng.normal(0.0, np.deg2rad(1.5))
         euler_spread = [0.04, 0.03, 0.08]
@@ -87,7 +87,7 @@ def _initial_state(rng: np.random.Generator, config: Aircraft6DOFConfig, mode: s
 
 def _command(t: np.ndarray, rng: np.random.Generator, mode: str) -> np.ndarray:
     family = _mode_family(mode)
-    bias = np.array([0.62, 0.0, 0.0, 0.0])
+    bias = np.array([0.38, 0.0, 0.0, 0.0])
     u = np.zeros((len(t), len(INPUT_NAMES)))
     if family == "trim_grid":
         amp = np.array([0.035, 0.045, 0.050, 0.040])

@@ -51,6 +51,33 @@ NUMERIC_FIELDS = {
     "max_speed_mps",
     "vertical_extent_m",
 }
+
+NED_TO_ENU = np.array([[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+
+
+def _rotation_body_to_inertial(quat_wxyz: np.ndarray) -> np.ndarray:
+    q0, q1, q2, q3 = quat_wxyz / max(float(np.linalg.norm(quat_wxyz)), 1e-12)
+    return np.array(
+        [
+            [1.0 - 2.0 * (q2**2 + q3**2), 2.0 * (q1 * q2 - q0 * q3), 2.0 * (q1 * q3 + q0 * q2)],
+            [2.0 * (q1 * q2 + q0 * q3), 1.0 - 2.0 * (q1**2 + q3**2), 2.0 * (q2 * q3 - q0 * q1)],
+            [2.0 * (q1 * q3 - q0 * q2), 2.0 * (q2 * q3 + q0 * q1), 1.0 - 2.0 * (q1**2 + q2**2)],
+        ]
+    )
+
+
+def _pose_ned_to_enu(pose_ned: np.ndarray) -> np.ndarray:
+    pose = np.empty_like(pose_ned)
+    pose[:, 0] = pose_ned[:, 1]
+    pose[:, 1] = pose_ned[:, 0]
+    pose[:, 2] = -pose_ned[:, 2]
+    if pose_ned.shape[1] < 7:
+        return pose
+    for index, quat in enumerate(pose_ned[:, 3:7]):
+        pose[index, 3:7] = _quat_wxyz_from_rotation(NED_TO_ENU @ _rotation_body_to_inertial(quat))
+    return pose
+
+
 def _git_sha(root: Path) -> str | None:
     try:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
@@ -148,10 +175,84 @@ def _real_dataset_rows(results_dir: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _dedupe_method_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the last row for each plotted method key.
+
+    Dataset-specific result files are appended after aggregate files, so this
+    lets refreshed real-data rows override stale aggregate rows without
+    duplicating website table entries.
+    """
+    by_key: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    order: list[tuple[str, str, str, str]] = []
+    for row in rows:
+        key = (
+            str(row.get("model_family") or ""),
+            str(row.get("scenario") or ""),
+            str(row.get("state_source") or ""),
+            str(row.get("method") or ""),
+        )
+        if key not in by_key:
+            order.append(key)
+        by_key[key] = row
+    return [by_key[key] for key in order]
+
+
 def _maneuver_rows(results_dir: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for raw in _read_csv(results_dir / "benchmark_maneuver_summary.csv"):
         rows.append({key: _coerce_value(key, value) for key, value in raw.items()})
+    return rows
+
+
+def _quaternion_to_euler_deg(quat_wxyz: np.ndarray) -> np.ndarray:
+    q0, q1, q2, q3 = quat_wxyz / max(float(np.linalg.norm(quat_wxyz)), 1e-12)
+    roll = math.atan2(2.0 * (q0 * q1 + q2 * q3), 1.0 - 2.0 * (q1**2 + q2**2))
+    pitch = math.asin(float(np.clip(2.0 * (q0 * q2 - q3 * q1), -1.0, 1.0)))
+    yaw = math.atan2(2.0 * (q0 * q3 + q1 * q2), 1.0 - 2.0 * (q2**2 + q3**2))
+    return np.rad2deg([roll, pitch, yaw])
+
+
+def _playback_maneuver_rows(playback_rows: list[dict[str, Any]], existing_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    existing_modes = {str(row.get("mode")) for row in existing_rows}
+    rows: list[dict[str, Any]] = []
+    for track in playback_rows:
+        title = str(track.get("title") or track.get("id") or "")
+        if not title or title in existing_modes:
+            continue
+        positions: list[np.ndarray] = []
+        speeds: list[np.ndarray] = []
+        pitch_abs: list[np.ndarray] = []
+        segments = track.get("segments") if isinstance(track.get("segments"), list) else [track]
+        for segment in segments:
+            if not isinstance(segment, dict) or not segment.get("position_enu_m"):
+                continue
+            time = np.asarray(segment.get("time_s", []), dtype=float)
+            position = np.asarray(segment["position_enu_m"], dtype=float)
+            if position.ndim != 2 or position.shape[0] < 2:
+                continue
+            positions.append(position)
+            if len(time) == len(position) and len(time) > 1:
+                velocity = np.gradient(position, time, axis=0)
+                speeds.append(np.linalg.norm(velocity, axis=1))
+            quat = np.asarray(segment.get("quaternion_wxyz", []), dtype=float)
+            if quat.ndim == 2 and quat.shape[1] == 4:
+                euler = np.asarray([_quaternion_to_euler_deg(row) for row in quat])
+                pitch_abs.append(np.abs(euler[:, 1]))
+        if not positions:
+            continue
+        all_position = np.concatenate(positions, axis=0)
+        all_speeds = np.concatenate(speeds) if speeds else np.asarray([], dtype=float)
+        all_pitch = np.concatenate(pitch_abs) if pitch_abs else np.asarray([], dtype=float)
+        rows.append(
+            {
+                "mode": title,
+                "max_abs_alpha_deg": None,
+                "max_abs_theta_deg": float(np.nanmax(all_pitch)) if all_pitch.size else None,
+                "min_speed_mps": float(np.nanmin(all_speeds)) if all_speeds.size else None,
+                "max_speed_mps": float(np.nanmax(all_speeds)) if all_speeds.size else None,
+                "vertical_extent_m": float(np.nanmax(all_position[:, 2]) - np.nanmin(all_position[:, 2])),
+            }
+        )
     return rows
 
 
@@ -382,10 +483,12 @@ def _npz_playback(root: Path, manifest: dict[str, Any]) -> dict[str, Any] | None
             if controls_2d is not None:
                 u = controls_2d[segment, :, :][::stride]
                 control = np.column_stack([u[:, 0], np.zeros(len(u)), u[:, 1], np.zeros(len(u))])
+            raw_pose = mocap[segment, :, :][::stride]
+            pose = _pose_ned_to_enu(raw_pose) if manifest.get("model_family") == MODEL_FAMILY_6DOF else raw_pose
             payload = _segment_payload(
                 name=f"validation_trial_{segment + 1}",
                 time_s=time[::stride],
-                pose=mocap[segment, :, :][::stride],
+                pose=pose,
                 control=control,
                 direct_state=direct_state[segment, :, :][::stride] if direct_state is not None else None,
             )
@@ -459,9 +562,11 @@ def export_web_data(
     method_rows = _method_rows(results_dir, dataset_modes, dataset_titles, method_training_modes)
     method_rows.extend(_six_dof_rows(results_dir))
     method_rows.extend(_real_dataset_rows(results_dir))
+    method_rows = _dedupe_method_rows(method_rows)
     maneuver_rows = _maneuver_rows(results_dir)
     dataset_manifests = [*_generated_dataset_registry(root), *discover_manifests(root / "dataset_tools")]
     playback_rows = _playback_registry(root, dataset_manifests)
+    maneuver_rows.extend(_playback_maneuver_rows(playback_rows, maneuver_rows))
     trace_rows = _method_trace_registry(results_dir)
     generated_at = datetime.now(UTC).isoformat()
     git_sha = _git_sha(root)

@@ -1,6 +1,7 @@
 import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js";
 
 const DATA_DIR = "./public/data";
+const AIRCRAFT_MODEL_SCALE = 0.6 / 2.2;
 
 const state = {
   manifest: null,
@@ -16,15 +17,12 @@ const state = {
   playbackScrubbing: false,
   playbackSegmentIndex: 0,
   playbackView: "animation",
-  playbackFollow: false,
+  playbackFollow: true,
   selectedMethods: new Set(),
-  modelFamily: "aircraft3dof",
-  scenario: "",
-  source: "direct",
-  uploadRows: [],
-  uploadScenarios: [],
-  uploadDatasets: [],
-  lastValidatedDataset: null,
+  tradeoffZoom: null,
+  modelFamily: "aircraft6dof",
+  scenario: "sportcub_mocap_4_17_26",
+  source: "mocap",
 };
 
 const ENU_TO_THREE_QUAT = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
@@ -47,14 +45,6 @@ function cleanMethodName(method) {
   return String(method || "").replace(" (mocap)", "").replace(" (direct)", "");
 }
 
-function slug(value) {
-  return String(value || "uploaded")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(0, 48) || "uploaded";
-}
-
 async function loadJson(name) {
   const response = await fetch(`${DATA_DIR}/${name}`);
   if (!response.ok) throw new Error(`failed to load ${name}: ${response.status}`);
@@ -62,15 +52,15 @@ async function loadJson(name) {
 }
 
 function allRows() {
-  return [...state.rows, ...state.uploadRows];
+  return state.rows;
 }
 
 function allScenarios() {
-  return [...state.manifest.scenarios, ...state.uploadScenarios];
+  return state.manifest.scenarios;
 }
 
 function allDatasets() {
-  return [...state.manifest.dataset_registry, ...state.uploadDatasets];
+  return state.manifest.dataset_registry;
 }
 
 function scenariosForModel() {
@@ -112,17 +102,22 @@ function activeSegment(track = selectedPlayback()) {
   return segments[index];
 }
 
+function traceSegmentForMethod(key) {
+  const trace = state.methodTraces.find((item) =>
+    item.scenario === state.scenario && item.state_source === state.source && methodKey(item.method) === key
+  );
+  const segment = trace?.segments?.[state.playbackSegmentIndex];
+  return segment ? { ...segment, method: key } : null;
+}
+
+function methodHasTrace(key) {
+  return Boolean(traceSegmentForMethod(key));
+}
+
 function selectedTraceSegments() {
   const keys = state.selectedMethods;
   if (!keys.size) return [];
-  return state.methodTraces
-    .filter((trace) => trace.scenario === state.scenario && trace.state_source === state.source && keys.has(methodKey(trace.method)))
-    .map((trace) => {
-      const segments = trace.segments || [];
-      const segment = segments[state.playbackSegmentIndex] || segments[0];
-      return segment ? { ...segment, method: methodKey(trace.method) } : null;
-    })
-    .filter(Boolean);
+  return Array.from(keys).map((key) => traceSegmentForMethod(key)).filter(Boolean);
 }
 
 function setDefaultScenario() {
@@ -159,6 +154,7 @@ function renderModelTabs() {
     button.addEventListener("click", () => {
       state.modelFamily = family;
       state.selectedMethods.clear();
+      resetTradeoffZoom();
       setDefaultScenario();
       render();
     });
@@ -178,31 +174,12 @@ function renderScenarioSelect() {
   select.value = state.scenario;
 }
 
-function renderMethodSelect() {
-  const select = document.querySelector("#upload-method");
-  const methods = state.manifest.method_registry
-    .filter((method) => method.model_families.includes(state.modelFamily))
-    .map((method) => method.name)
-    .sort();
-  select.innerHTML = "";
-  for (const method of methods) {
-    const option = document.createElement("option");
-    option.value = method;
-    option.textContent = method;
-    select.append(option);
-  }
-}
-
-function selectedMethodMetadata() {
-  const name = document.querySelector("#upload-method").value;
-  return state.manifest.method_registry.find((method) => method.name === name) || null;
-}
-
 function bindControls() {
   document.querySelector("#scenario-select").addEventListener("change", (event) => {
     state.scenario = event.target.value;
     state.playbackSegmentIndex = 0;
     state.selectedMethods.clear();
+    resetTradeoffZoom();
     render();
   });
 
@@ -211,6 +188,7 @@ function bindControls() {
     if (!button) return;
     state.source = button.dataset.source;
     state.selectedMethods.clear();
+    resetTradeoffZoom();
     render();
   });
 
@@ -222,9 +200,6 @@ function bindControls() {
     if (state.playbackView === "animation") resizePlayback();
   });
 
-  document.querySelector("#upload-run").addEventListener("click", analyzeUpload);
-  document.querySelector("#method-command").addEventListener("click", renderMethodCommand);
-  document.querySelector("#simulate-command").addEventListener("click", renderSimCommand);
   document.querySelector("#playback-toggle").addEventListener("click", () => {
     state.playbackPlaying = !state.playbackPlaying;
     renderPlaybackControls(selectedPlayback());
@@ -239,22 +214,19 @@ function bindControls() {
     state.playbackFollow = !state.playbackFollow;
     renderPlaybackControls(selectedPlayback());
   });
-  document.querySelector("#methods-select-all").addEventListener("click", () => {
-    for (const row of selectedRows()) state.selectedMethods.add(methodKey(row.method));
-    render();
-  });
-  document.querySelector("#methods-clear").addEventListener("click", () => {
-    state.selectedMethods.clear();
-    render();
-  });
   document.querySelector("#playback-speed").addEventListener("change", (event) => {
     state.playbackSpeed = Number.parseFloat(event.target.value) || 1;
   });
   document.querySelector("#playback-segment").addEventListener("change", (event) => {
     state.playbackSegmentIndex = Number.parseInt(event.target.value, 10) || 0;
     state.playbackTimeS = 0;
+    if (Array.from(state.selectedMethods).some((key) => !methodHasTrace(key))) {
+      state.selectedMethods.clear();
+    }
     setPlaybackTrack(selectedPlayback(), true);
     renderTimeseries();
+    renderTradeoff(selectedRows());
+    renderLeaderboard(selectedRows());
   });
   document.querySelector("#playback-scrub").addEventListener("input", (event) => {
     const track = selectedPlayback();
@@ -264,12 +236,6 @@ function bindControls() {
   });
   document.querySelector("#playback-scrub").addEventListener("change", () => {
     state.playbackScrubbing = false;
-  });
-  document.querySelector("#upload-data-family").addEventListener("change", (event) => {
-    state.modelFamily = event.target.value;
-    state.selectedMethods.clear();
-    setDefaultScenario();
-    render();
   });
 }
 
@@ -312,19 +278,67 @@ function logScale(value, min, max, start, end) {
   return start + t * (end - start);
 }
 
+function tradeoffKey() {
+  return `${state.modelFamily}:${state.scenario}:${state.source}`;
+}
+
+function resetTradeoffZoom() {
+  state.tradeoffZoom = null;
+}
+
+function constrainedLogView(view, base) {
+  const minSpan = 0.12;
+  const baseXSpan = base.xMax - base.xMin;
+  const baseYSpan = base.yMax - base.yMin;
+  let xMin = view.xMin;
+  let xMax = view.xMax;
+  let yMin = view.yMin;
+  let yMax = view.yMax;
+  if (xMax - xMin < minSpan) {
+    const center = (xMin + xMax) / 2;
+    xMin = center - minSpan / 2;
+    xMax = center + minSpan / 2;
+  }
+  if (yMax - yMin < minSpan) {
+    const center = (yMin + yMax) / 2;
+    yMin = center - minSpan / 2;
+    yMax = center + minSpan / 2;
+  }
+  if (xMax - xMin >= baseXSpan) {
+    xMin = base.xMin;
+    xMax = base.xMax;
+  } else {
+    if (xMin < base.xMin) {
+      xMax += base.xMin - xMin;
+      xMin = base.xMin;
+    }
+    if (xMax > base.xMax) {
+      xMin -= xMax - base.xMax;
+      xMax = base.xMax;
+    }
+  }
+  if (yMax - yMin >= baseYSpan) {
+    yMin = base.yMin;
+    yMax = base.yMax;
+  } else {
+    if (yMin < base.yMin) {
+      yMax += base.yMin - yMin;
+      yMin = base.yMin;
+    }
+    if (yMax > base.yMax) {
+      yMin -= yMax - base.yMax;
+      yMax = base.yMax;
+    }
+  }
+  return { xMin, xMax, yMin, yMax };
+}
+
 function powers(min, max) {
   const out = [];
   for (let power = Math.floor(Math.log10(min)); power <= Math.ceil(Math.log10(max)); power += 1) {
     out.push(10 ** power);
   }
   return out;
-}
-
-function setActionProgress(percent, message) {
-  const bar = document.querySelector("#action-progress-bar");
-  const status = document.querySelector("#upload-status");
-  if (bar) bar.style.width = `${clamp(percent, 0, 100)}%`;
-  if (status && message) status.textContent = message;
 }
 
 function renderTradeoff(rows) {
@@ -335,12 +349,91 @@ function renderTradeoff(rows) {
   const margin = { top: 20, right: 34, bottom: 54, left: 76 };
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
-  const xExtent = logExtent(rows.map((row) => row.train_elapsed_s || row.total_elapsed_s || row.rollout_elapsed_s));
-  const yExtent = logExtent(rows.map((row) => row.validation_score));
+  const baseXExtent = logExtent(rows.map((row) => row.train_elapsed_s || row.total_elapsed_s || row.rollout_elapsed_s));
+  const baseYExtent = logExtent(rows.map((row) => row.validation_score));
+  const baseLogView = {
+    xMin: Math.log10(baseXExtent[0]),
+    xMax: Math.log10(baseXExtent[1]),
+    yMin: Math.log10(baseYExtent[0]),
+    yMax: Math.log10(baseYExtent[1]),
+  };
+  if (!state.tradeoffZoom || state.tradeoffZoom.key !== tradeoffKey()) {
+    state.tradeoffZoom = { key: tradeoffKey(), ...baseLogView };
+  }
+  state.tradeoffZoom = { key: tradeoffKey(), ...constrainedLogView(state.tradeoffZoom, baseLogView) };
+  const xExtent = [10 ** state.tradeoffZoom.xMin, 10 ** state.tradeoffZoom.xMax];
+  const yExtent = [10 ** state.tradeoffZoom.yMin, 10 ** state.tradeoffZoom.yMax];
   const color = state.source === "direct" ? "var(--direct)" : "var(--mocap)";
 
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("aria-label", "Cost-error tradeoff. Mouse wheel zooms, drag pans, double-click resets.");
+  const eventPoint = (event) => {
+    const rect = svg.getBoundingClientRect();
+    const x = (event.clientX - rect.left) * width / Math.max(rect.width, 1);
+    const y = (event.clientY - rect.top) * height / Math.max(rect.height, 1);
+    return { x, y };
+  };
+  const inPlot = ({ x, y }) => x >= margin.left && x <= margin.left + plotWidth && y >= margin.top && y <= margin.top + plotHeight;
+  const logAtPoint = ({ x, y }) => ({
+    x: state.tradeoffZoom.xMin + ((x - margin.left) / plotWidth) * (state.tradeoffZoom.xMax - state.tradeoffZoom.xMin),
+    y: state.tradeoffZoom.yMax - ((y - margin.top) / plotHeight) * (state.tradeoffZoom.yMax - state.tradeoffZoom.yMin),
+  });
+  const setLogView = (view) => {
+    state.tradeoffZoom = { key: tradeoffKey(), ...constrainedLogView(view, baseLogView) };
+    render();
+  };
+  svg.addEventListener("wheel", (event) => {
+    const point = eventPoint(event);
+    if (!inPlot(point)) return;
+    event.preventDefault();
+    const anchor = logAtPoint(point);
+    const factor = event.deltaY < 0 ? 0.82 : 1.22;
+    const view = state.tradeoffZoom;
+    setLogView({
+      xMin: anchor.x - (anchor.x - view.xMin) * factor,
+      xMax: anchor.x + (view.xMax - anchor.x) * factor,
+      yMin: anchor.y - (anchor.y - view.yMin) * factor,
+      yMax: anchor.y + (view.yMax - anchor.y) * factor,
+    });
+  }, { passive: false });
+  svg.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || event.target.classList?.contains("tradeoff-point")) return;
+    const point = eventPoint(event);
+    if (!inPlot(point)) return;
+    const dragStart = { clientX: event.clientX, clientY: event.clientY, view: { ...state.tradeoffZoom } };
+    const moveDrag = (moveEvent) => {
+      const dx = (moveEvent.clientX - dragStart.clientX) * width / Math.max(svg.getBoundingClientRect().width, 1);
+      const dy = (moveEvent.clientY - dragStart.clientY) * height / Math.max(svg.getBoundingClientRect().height, 1);
+      const xSpan = dragStart.view.xMax - dragStart.view.xMin;
+      const ySpan = dragStart.view.yMax - dragStart.view.yMin;
+      state.tradeoffZoom = {
+        key: tradeoffKey(),
+        ...constrainedLogView({
+          xMin: dragStart.view.xMin - (dx / plotWidth) * xSpan,
+          xMax: dragStart.view.xMax - (dx / plotWidth) * xSpan,
+          yMin: dragStart.view.yMin + (dy / plotHeight) * ySpan,
+          yMax: dragStart.view.yMax + (dy / plotHeight) * ySpan,
+        }, baseLogView),
+      };
+      renderTradeoff(rows);
+    };
+    const stopDrag = () => {
+      document.removeEventListener("pointermove", moveDrag);
+      document.removeEventListener("pointerup", stopDrag);
+      document.removeEventListener("pointercancel", stopDrag);
+      svg.classList.remove("dragging");
+    };
+    document.addEventListener("pointermove", moveDrag);
+    document.addEventListener("pointerup", stopDrag);
+    document.addEventListener("pointercancel", stopDrag);
+    svg.classList.add("dragging");
+    svg.setPointerCapture(event.pointerId);
+  });
+  svg.addEventListener("dblclick", () => {
+    resetTradeoffZoom();
+    render();
+  });
 
   const add = (tag, attrs, text) => {
     const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
@@ -364,6 +457,7 @@ function renderTradeoff(rows) {
   add("rect", { x: margin.left, y: margin.top, width: plotWidth, height: plotHeight, fill: "none", stroke: "var(--line)" });
   add("text", { x: margin.left + plotWidth / 2, y: height - 8, "text-anchor": "middle", class: "axis-label" }, "training time [s]");
   add("text", { x: 18, y: margin.top + plotHeight / 2, transform: `rotate(-90 18 ${margin.top + plotHeight / 2})`, "text-anchor": "middle", class: "axis-label" }, "validation score (lower is better)");
+  add("text", { x: margin.left + plotWidth, y: margin.top - 6, "text-anchor": "end", class: "plot-hint" }, "wheel zoom | drag pan | double-click reset");
 
   const nominal = rows.find((row) => cleanMethodName(row.method).includes("Nominal") && finiteNumber(row.validation_score));
   if (nominal) {
@@ -395,6 +489,7 @@ function renderTradeoff(rows) {
     const y = logScale(row.validation_score, yExtent[0], yExtent[1], margin.top + plotHeight, margin.top);
     const isNominal = cleanMethodName(row.method).includes("Nominal");
     const key = methodKey(row.method);
+    const hasTrace = methodHasTrace(key);
     const selected = state.selectedMethods.has(key);
     const circle = add("circle", {
       cx: x,
@@ -403,13 +498,15 @@ function renderTradeoff(rows) {
       fill: isNominal ? "white" : color,
       stroke: selected ? "#111827" : isNominal ? "var(--nominal)" : "#1d2430",
       "stroke-width": selected ? 2.6 : isNominal ? 1.8 : 1,
-      opacity: state.selectedMethods.size && !selected ? 0.34 : 0.88,
-      class: "tradeoff-point",
-      tabindex: "0",
+      opacity: hasTrace ? (state.selectedMethods.size && !selected ? 0.34 : 0.88) : 0.22,
+      class: `tradeoff-point${hasTrace ? "" : " no-trace"}`,
+      tabindex: hasTrace ? "0" : "-1",
     });
-    circle.addEventListener("click", () => toggleMethodSelection(key));
+    if (hasTrace) circle.addEventListener("click", () => toggleMethodSelection(key));
     const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-    title.textContent = `${cleanMethodName(row.method)} | ${formatNumber(row.validation_score)}`;
+    title.textContent = hasTrace
+      ? `${cleanMethodName(row.method)} | ${formatNumber(row.validation_score)}`
+      : `${cleanMethodName(row.method)} | ${formatNumber(row.validation_score)} | no exported trajectory`;
     circle.append(title);
   }
 
@@ -434,11 +531,14 @@ function renderLeaderboard(rows) {
   for (const row of rows) {
     const tr = document.createElement("tr");
     const key = methodKey(row.method);
-    tr.className = state.selectedMethods.has(key) ? "selected-method-row" : "";
-    tr.addEventListener("click", () => toggleMethodSelection(key));
+    const hasTrace = methodHasTrace(key);
+    tr.className = `${state.selectedMethods.has(key) ? "selected-method-row" : ""}${hasTrace ? "" : " no-trace-row"}`;
+    tr.title = hasTrace ? "Click to show this model trajectory." : "No exported model trajectory is available for this flight segment.";
+    if (hasTrace) tr.addEventListener("click", () => toggleMethodSelection(key));
     const values = [
       cleanMethodName(row.method),
       formatNumber(row.validation_score),
+      formatNumber(row.rmse_position_m ?? row.rmse_mocap_position_m),
       formatNumber(row.train_elapsed_s),
       formatNumber(row.rollout_elapsed_s),
       row.training_scenario || "--",
@@ -446,7 +546,7 @@ function renderLeaderboard(rows) {
     for (const [index, value] of values.entries()) {
       const cell = document.createElement("td");
       cell.textContent = value;
-      if (index > 0 && index < 4) cell.className = "numeric";
+      if (index > 0 && index < 5) cell.className = "numeric";
       tr.append(cell);
     }
     body.append(tr);
@@ -454,9 +554,13 @@ function renderLeaderboard(rows) {
 }
 
 function toggleMethodSelection(key) {
+  if (!methodHasTrace(key)) {
+    return;
+  }
   if (state.selectedMethods.has(key)) {
     state.selectedMethods.delete(key);
   } else {
+    state.selectedMethods.clear();
     state.selectedMethods.add(key);
   }
   render();
@@ -544,7 +648,7 @@ function playbackDuration(trackOrSegment) {
 
 function seekPlayback(timeS) {
   const segment = activeSegment();
-  state.playbackTimeS = ((timeS % playbackDuration(segment)) + playbackDuration(segment)) % playbackDuration(segment);
+  state.playbackTimeS = clamp(timeS, 0, playbackDuration(segment));
   state.playbackLastMs = null;
   updatePlaybackScrub(segment);
 }
@@ -575,58 +679,94 @@ function makeTaperedControlGeometry(chord, span, thickness, spanAxis = "z") {
   return geometry;
 }
 
+function makeWingPanelGeometry(rootChord, tipChord, span, thickness, side) {
+  const zRoot = side * 0.18;
+  const zTip = side * (0.18 + span);
+  const leadingRoot = rootChord / 2;
+  const trailingRoot = -rootChord / 2;
+  const leadingTip = rootChord / 2 - 0.1;
+  const trailingTip = leadingTip - tipChord;
+  const yTop = thickness / 2;
+  const yBottom = -thickness / 2;
+  const positions = [
+    leadingRoot, yTop, zRoot, trailingRoot, yTop, zRoot, trailingTip, yTop, zTip, leadingTip, yTop, zTip,
+    leadingRoot, yBottom, zRoot, trailingRoot, yBottom, zRoot, trailingTip, yBottom, zTip, leadingTip, yBottom, zTip,
+  ];
+  const indices = [
+    0, 1, 2, 0, 2, 3,
+    4, 7, 6, 4, 6, 5,
+    0, 4, 5, 0, 5, 1,
+    1, 5, 6, 1, 6, 2,
+    2, 6, 7, 2, 7, 3,
+    3, 7, 4, 3, 4, 0,
+  ];
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 function makeAircraftMesh() {
   const group = new THREE.Group();
+  const model = new THREE.Group();
+  model.scale.setScalar(AIRCRAFT_MODEL_SCALE);
+  group.add(model);
   const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0x2f5f9f, roughness: 0.46, metalness: 0.08 });
   const wingMaterial = new THREE.MeshStandardMaterial({ color: 0xd9e2ef, roughness: 0.55, metalness: 0.04 });
   const accentMaterial = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.5, metalness: 0.02 });
-  const controlMaterial = new THREE.MeshStandardMaterial({ color: 0xff8a1f, roughness: 0.42, metalness: 0.02 });
+  const cockpitMaterial = new THREE.MeshStandardMaterial({ color: 0x8aa5bf, roughness: 0.28, metalness: 0.04, transparent: true, opacity: 0.78 });
+  const controlMaterial = new THREE.MeshStandardMaterial({ color: 0xff8a1f, roughness: 0.42, metalness: 0.02, side: THREE.DoubleSide });
   const propMaterial = new THREE.MeshStandardMaterial({ color: 0x2b3442, roughness: 0.35, metalness: 0.08 });
   const propDiskMaterial = new THREE.MeshBasicMaterial({ color: 0x7fb4ff, transparent: true, opacity: 0.16, side: THREE.DoubleSide });
 
-  const fuselage = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.18, 0.16), bodyMaterial);
-  group.add(fuselage);
-  const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.12, 0.28, 24), accentMaterial);
+  const fuselage = new THREE.Mesh(new THREE.CylinderGeometry(0.115, 0.115, 1.35, 18), bodyMaterial);
+  fuselage.rotation.z = Math.PI / 2;
+  model.add(fuselage);
+  const cockpit = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.15, 0.15), cockpitMaterial);
+  cockpit.position.set(0.28, 0.14, 0);
+  model.add(cockpit);
+  const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.105, 0.28, 24), wingMaterial);
   nose.rotation.z = Math.PI / 2;
   nose.position.x = 0.82;
-  group.add(nose);
-  const wingCenter = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.035, 1.1), wingMaterial);
-  wingCenter.position.x = 0.02;
-  group.add(wingCenter);
-  const leftWing = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.035, 0.75), wingMaterial);
-  leftWing.position.set(0.02, 0, -0.92);
-  group.add(leftWing);
-  const rightWing = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.035, 0.75), wingMaterial);
-  rightWing.position.set(0.02, 0, 0.92);
-  group.add(rightWing);
+  model.add(nose);
+  const wingCenter = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.035, 0.42), wingMaterial);
+  wingCenter.position.set(0.2, -0.035, 0);
+  model.add(wingCenter);
+  const leftWing = new THREE.Mesh(makeWingPanelGeometry(0.48, 0.32, 0.78, 0.035, -1), wingMaterial);
+  leftWing.position.set(0.2, -0.035, 0);
+  model.add(leftWing);
+  const rightWing = new THREE.Mesh(makeWingPanelGeometry(0.48, 0.32, 0.78, 0.035, 1), wingMaterial);
+  rightWing.position.set(0.2, -0.035, 0);
+  model.add(rightWing);
 
   const leftAileron = new THREE.Group();
-  leftAileron.position.set(-0.14, -0.012, -0.95);
-  const leftAileronPanel = new THREE.Mesh(makeTaperedControlGeometry(0.32, 0.78, 0.065), controlMaterial);
+  leftAileron.position.set(0.02, -0.05, -0.72);
+  const leftAileronPanel = new THREE.Mesh(makeTaperedControlGeometry(0.18, 0.46, 0.032), controlMaterial);
   leftAileron.add(leftAileronPanel);
-  group.add(leftAileron);
+  model.add(leftAileron);
   const rightAileron = new THREE.Group();
-  rightAileron.position.set(-0.14, -0.012, 0.95);
-  const rightAileronPanel = new THREE.Mesh(makeTaperedControlGeometry(0.32, 0.78, 0.065), controlMaterial);
+  rightAileron.position.set(0.02, -0.05, 0.72);
+  const rightAileronPanel = new THREE.Mesh(makeTaperedControlGeometry(0.18, 0.46, 0.032), controlMaterial);
   rightAileron.add(rightAileronPanel);
-  group.add(rightAileron);
+  model.add(rightAileron);
 
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.03, 0.96), wingMaterial);
-  tail.position.x = -0.58;
-  group.add(tail);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.03, 0.96), wingMaterial);
+  tail.position.x = -0.64;
+  model.add(tail);
   const elevator = new THREE.Group();
-  elevator.position.set(-0.82, -0.01, 0);
-  const elevatorPanel = new THREE.Mesh(makeTaperedControlGeometry(0.3, 0.98, 0.065), controlMaterial);
+  elevator.position.set(-0.78, -0.01, 0);
+  const elevatorPanel = new THREE.Mesh(makeTaperedControlGeometry(0.16, 0.96, 0.038), controlMaterial);
   elevator.add(elevatorPanel);
-  group.add(elevator);
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.54, 0.05), wingMaterial);
-  fin.position.set(-0.62, 0.31, 0);
-  group.add(fin);
+  model.add(elevator);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.52, 0.05), wingMaterial);
+  fin.position.set(-0.66, 0.31, 0);
+  model.add(fin);
   const rudder = new THREE.Group();
-  rudder.position.set(-0.84, 0.33, 0);
-  const rudderPanel = new THREE.Mesh(makeTaperedControlGeometry(0.28, 0.68, 0.08, "y"), controlMaterial);
+  rudder.position.set(-0.79, 0.31, 0);
+  const rudderPanel = new THREE.Mesh(makeTaperedControlGeometry(0.15, 0.52, 0.045, "y"), controlMaterial);
   rudder.add(rudderPanel);
-  group.add(rudder);
+  model.add(rudder);
 
   const prop = new THREE.Group();
   prop.position.x = 1.03;
@@ -635,9 +775,25 @@ function makeAircraftMesh() {
   const disk = new THREE.Mesh(new THREE.CircleGeometry(0.42, 48), propDiskMaterial);
   disk.rotation.y = Math.PI / 2;
   prop.add(bladeA, bladeB, disk);
-  group.add(prop);
+  model.add(prop);
   group.userData = { leftAileron, rightAileron, elevator, rudder, prop, propDisk: disk };
   return group;
+}
+
+function makeTransparentAircraftMesh(color) {
+  const aircraft = makeAircraftMesh();
+  aircraft.traverse((child) => {
+    if (!child.isMesh || !child.material) return;
+    const material = child.material.clone();
+    if (material.color) material.color.set(color);
+    material.transparent = true;
+    material.opacity = child.geometry?.type === "CircleGeometry" ? 0.08 : 0.34;
+    material.depthWrite = false;
+    material.side = THREE.DoubleSide;
+    child.material = material;
+    child.renderOrder = 10;
+  });
+  return aircraft;
 }
 
 function updateAircraftControls(aircraft, controls, deltaS) {
@@ -831,7 +987,7 @@ function ensurePlaybackScene() {
   }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.setSize(host.clientWidth || 900, host.clientHeight || 360);
-  renderer.setClearColor(0xf4f7fb, 1);
+  renderer.setClearColor(0xd9dee7, 1);
   host.append(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -840,7 +996,7 @@ function ensurePlaybackScene() {
   const sun = new THREE.DirectionalLight(0xffffff, 1.8);
   sun.position.set(6, 10, 8);
   scene.add(sun);
-  const grid = new THREE.GridHelper(18, 18, 0xc7d1df, 0xe1e7f0);
+  const grid = new THREE.GridHelper(18, 18, 0x9aa8ba, 0xc2cad6);
   scene.add(grid);
   const aircraft = makeAircraftMesh();
   scene.add(aircraft);
@@ -854,6 +1010,7 @@ function ensurePlaybackScene() {
     axes: null,
     trackLine: null,
     methodLines: [],
+    methodAircraft: [],
     track: null,
     methodSignature: "",
     controls: {
@@ -914,6 +1071,11 @@ function setPlaybackTrack(track, force = false) {
     disposeLine(line);
   }
   playback.methodLines = [];
+  for (const overlay of playback.methodAircraft) {
+    playback.scene.remove(overlay.mesh);
+    disposeObject3D(overlay.mesh);
+  }
+  playback.methodAircraft = [];
   if (!track || !segment) return;
   const points = segment.position_enu_m.map(enuToThree);
   const geometry = new THREE.BufferGeometry().setFromPoints(points);
@@ -923,10 +1085,11 @@ function setPlaybackTrack(track, force = false) {
   const methodColors = [0x111827, 0x7c3aed, 0x059669, 0xb45309, 0xbe123c];
   selectedTraceSegments().forEach((trace, index) => {
     if (!trace.position_enu_m?.length) return;
+    const color = methodColors[index % methodColors.length];
     const tracePoints = trace.position_enu_m.map(enuToThree);
     const traceGeometry = new THREE.BufferGeometry().setFromPoints(tracePoints);
     const traceMaterial = new THREE.LineBasicMaterial({
-      color: methodColors[index % methodColors.length],
+      color,
       linewidth: 2,
       transparent: true,
       opacity: 0.78,
@@ -934,6 +1097,9 @@ function setPlaybackTrack(track, force = false) {
     const traceLine = new THREE.Line(traceGeometry, traceMaterial);
     playback.methodLines.push(traceLine);
     playback.scene.add(traceLine);
+    const traceAircraft = makeTransparentAircraftMesh(color);
+    playback.methodAircraft.push({ mesh: traceAircraft, segment: trace });
+    playback.scene.add(traceAircraft);
   });
   const box = new THREE.Box3().setFromPoints(points);
   const center = box.getCenter(new THREE.Vector3());
@@ -941,7 +1107,7 @@ function setPlaybackTrack(track, force = false) {
   const size = Math.max(extents.x, extents.y, extents.z, 1);
   playback.controls.target.copy(center);
   playback.controls.distance = clamp(size * 2.2, 4, 120);
-  playback.controls.minDistance = Math.max(size * 0.18, 0.8);
+  playback.controls.minDistance = 0.25;
   playback.controls.maxDistance = Math.max(size * 8, 20);
   if (playback.grid) {
     playback.scene.remove(playback.grid);
@@ -949,7 +1115,7 @@ function setPlaybackTrack(track, force = false) {
     disposeMaterial(playback.grid.material);
   }
   const gridSize = Math.max(10, Math.ceil(size * 1.5));
-  playback.grid = new THREE.GridHelper(gridSize, 20, 0xc7d1df, 0xe1e7f0);
+  playback.grid = new THREE.GridHelper(gridSize, 20, 0x9aa8ba, 0xc2cad6);
   playback.grid.position.copy(center);
   playback.grid.position.y = Math.min(...points.map((point) => point.y));
   playback.scene.add(playback.grid);
@@ -964,12 +1130,13 @@ function setPlaybackTrack(track, force = false) {
   renderPlaybackControls(track);
 }
 
-function sampleTrack(trackOrSegment, elapsedS) {
+function sampleTrack(trackOrSegment, elapsedS, options = {}) {
   const track = trackOrSegment?.segments ? activeSegment(trackOrSegment) : trackOrSegment;
   if (!track) return null;
   const times = track.time_s;
   const duration = Math.max(times[times.length - 1] || 1, 1);
-  const t = ((elapsedS % duration) + duration) % duration;
+  if (!options.loop && (elapsedS < times[0] || elapsedS > duration)) return null;
+  const t = options.loop ? ((elapsedS % duration) + duration) % duration : clamp(elapsedS, times[0], duration);
   let index = 0;
   while (index < times.length - 2 && times[index + 1] < t) index += 1;
   const t0 = times[index];
@@ -1032,12 +1199,20 @@ function tickPlayback(nowMs) {
     if (state.playbackPlaying && !state.playbackScrubbing) {
       state.playbackTimeS = (state.playbackTimeS + deltaS * state.playbackSpeed) % playbackDuration(segment);
     }
-    const sample = sampleTrack(segment, state.playbackTimeS);
+    const sample = sampleTrack(segment, state.playbackTimeS, { loop: true });
     if (sample) {
       playback.aircraft.position.copy(sample.position);
       playback.aircraft.quaternion.copy(sample.quaternion);
       updateAircraftControls(playback.aircraft, sample.controls, deltaS);
       updateControlHud(sample.controls);
+      for (const overlay of playback.methodAircraft) {
+        const methodSample = sampleTrack(overlay.segment, state.playbackTimeS);
+        overlay.mesh.visible = Boolean(methodSample);
+        if (!methodSample) continue;
+        overlay.mesh.position.copy(methodSample.position);
+        overlay.mesh.quaternion.copy(methodSample.quaternion);
+        updateAircraftControls(overlay.mesh, methodSample.controls, deltaS);
+      }
       if (state.playbackFollow) {
         playback.controls.target.copy(sample.position);
         updatePlaybackCamera(playback);
@@ -1078,7 +1253,7 @@ function linearExtent(values) {
 function renderMiniSeries(title, series, traces) {
   const width = 520;
   const height = 170;
-  const margin = { top: 24, right: 18, bottom: 26, left: 42 };
+  const margin = { top: 28, right: 18, bottom: 34, left: 58 };
   const values = series.values.concat(...traces.map((trace) => trace.values));
   const xExtent = [series.time[0] || 0, series.time.at(-1) || 1];
   const yExtent = linearExtent(values);
@@ -1093,18 +1268,34 @@ function renderMiniSeries(title, series, traces) {
     svg.append(node);
     return node;
   };
-  add("text", { x: margin.left, y: 15, class: "series-title" }, title);
+  add("text", { x: margin.left, y: 16, class: "series-title" }, title);
   for (let i = 0; i <= 3; i += 1) {
-    const y = margin.top + (i / 3) * (height - margin.top - margin.bottom);
+    const fraction = i / 3;
+    const value = yExtent[1] - fraction * (yExtent[1] - yExtent[0]);
+    const y = margin.top + fraction * (height - margin.top - margin.bottom);
     add("line", { x1: margin.left, y1: y, x2: width - margin.right, y2: y, class: "grid-line" });
+    add("text", {
+      x: margin.left - 8,
+      y: y + 4,
+      "text-anchor": "end",
+      class: "tick",
+    }, formatNumber(value));
   }
+  add("line", { x1: margin.left, y1: height - margin.bottom, x2: width - margin.right, y2: height - margin.bottom, class: "axis-line" });
+  add("line", { x1: margin.left, y1: margin.top, x2: margin.left, y2: height - margin.bottom, class: "axis-line" });
   const path = (time, data) => time.map((t, index) => `${index ? "L" : "M"}${xScale(t).toFixed(2)},${yScale(data[index]).toFixed(2)}`).join(" ");
   add("path", { d: path(series.time, series.values), class: "truth-series" });
   for (const trace of traces) {
-    add("path", { d: path(trace.time, trace.values), class: "method-series" });
+    const pairs = trace.time
+      .map((timeValue, index) => [timeValue, trace.values[index]])
+      .filter(([timeValue]) => timeValue >= xExtent[0] && timeValue <= xExtent[1]);
+    if (pairs.length > 1) {
+      add("path", { d: path(pairs.map((row) => row[0]), pairs.map((row) => row[1])), class: "method-series" });
+    }
   }
-  add("text", { x: margin.left, y: height - 7, class: "tick" }, `${formatNumber(xExtent[0])} s`);
-  add("text", { x: width - margin.right, y: height - 7, "text-anchor": "end", class: "tick" }, `${formatNumber(xExtent[1])} s`);
+  add("text", { x: margin.left, y: height - 17, class: "tick" }, formatNumber(xExtent[0]));
+  add("text", { x: width - margin.right, y: height - 17, "text-anchor": "end", class: "tick" }, formatNumber(xExtent[1]));
+  add("text", { x: (margin.left + width - margin.right) / 2, y: height - 7, "text-anchor": "middle", class: "axis-label" }, "time [s]");
   return svg;
 }
 
@@ -1125,16 +1316,16 @@ function renderTimeseries() {
   const eulerDeg = quat.map(quaternionToEulerDeg);
   const traceSegments = selectedTraceSegments();
   const definitions = [
-    ["x east", pose.map((row) => row[0]), (trace) => trace.position_enu_m?.map((row) => row[0])],
-    ["y north", pose.map((row) => row[1]), (trace) => trace.position_enu_m?.map((row) => row[1])],
-    ["z up", pose.map((row) => row[2]), (trace) => trace.position_enu_m?.map((row) => row[2])],
-    ["roll deg", eulerDeg.map((row) => row[0]), (trace) => trace.quaternion_wxyz?.map((row) => quaternionToEulerDeg(row)[0])],
-    ["pitch deg", eulerDeg.map((row) => row[1]), (trace) => trace.quaternion_wxyz?.map((row) => quaternionToEulerDeg(row)[1])],
-    ["yaw deg", eulerDeg.map((row) => row[2]), (trace) => trace.quaternion_wxyz?.map((row) => quaternionToEulerDeg(row)[2])],
-    ["thrust", controls.map((row) => row[0] ?? 0), (trace) => trace.control_meas?.map((row) => row[0] ?? 0)],
-    ["aileron", controls.map((row) => row[1] ?? 0), (trace) => trace.control_meas?.map((row) => row[1] ?? 0)],
-    ["elevator", controls.map((row) => row[2] ?? 0), (trace) => trace.control_meas?.map((row) => row[2] ?? 0)],
-    ["rudder", controls.map((row) => row[3] ?? 0), (trace) => trace.control_meas?.map((row) => row[3] ?? 0)],
+    ["East position [m]", pose.map((row) => row[0]), (trace) => trace.position_enu_m?.map((row) => row[0])],
+    ["North position [m]", pose.map((row) => row[1]), (trace) => trace.position_enu_m?.map((row) => row[1])],
+    ["Up position [m]", pose.map((row) => row[2]), (trace) => trace.position_enu_m?.map((row) => row[2])],
+    ["Roll [deg]", eulerDeg.map((row) => row[0]), (trace) => trace.quaternion_wxyz?.map((row) => quaternionToEulerDeg(row)[0])],
+    ["Pitch [deg]", eulerDeg.map((row) => row[1]), (trace) => trace.quaternion_wxyz?.map((row) => quaternionToEulerDeg(row)[1])],
+    ["Yaw [deg]", eulerDeg.map((row) => row[2]), (trace) => trace.quaternion_wxyz?.map((row) => quaternionToEulerDeg(row)[2])],
+    ["Thrust command [-]", controls.map((row) => row[0] ?? 0), (trace) => trace.control_meas?.map((row) => row[0] ?? 0)],
+    ["Aileron command [-]", controls.map((row) => row[1] ?? 0), (trace) => trace.control_meas?.map((row) => row[1] ?? 0)],
+    ["Elevator command [-]", controls.map((row) => row[2] ?? 0), (trace) => trace.control_meas?.map((row) => row[2] ?? 0)],
+    ["Rudder command [-]", controls.map((row) => row[3] ?? 0), (trace) => trace.control_meas?.map((row) => row[3] ?? 0)],
   ].filter((item) => item[1].length);
   for (const [title, values, traceAccessor] of definitions) {
     const traces = traceSegments
@@ -1142,349 +1333,9 @@ function renderTimeseries() {
       .filter((trace) => trace.values?.length === trace.time?.length);
     host.append(renderMiniSeries(title, { time, values }, traces));
   }
-  const selected = state.selectedMethods.size ? `${state.selectedMethods.size} selected method(s)` : "select methods to overlay exported model trajectories";
+  const selected = state.selectedMethods.size ? `${Array.from(state.selectedMethods)[0]} selected` : "select one method to overlay its exported model trajectory";
   const available = traceSegments.length ? "model trajectories shown" : "no exported model trajectories for this dataset yet";
   status.textContent = `${segment.name || "flight"} | ${selected} | ${available}`;
-}
-
-const FORMAT_VERSION = "sysid.timeseries.ragged.v1";
-const REQUIRED_SPLIT_KEYS = [
-  "time_s",
-  "valid_mask",
-  "control_meas",
-  "pose_meas",
-  "segment_names",
-  "control_names",
-  "pose_names",
-  "system_dof",
-  "format_version",
-  "dataset_id",
-  "split_name",
-  "sample_period_s",
-  "truth_available",
-];
-const POSE_NAMES_BY_MODEL = {
-  aircraft3dof: ["x_e", "z_u", "theta"],
-  aircraft6dof: ["x_e", "y_n", "z_u", "q_w", "q_x", "q_y", "q_z"],
-};
-const DIRECT_STATE_NAMES_BY_MODEL = {
-  aircraft3dof: ["V", "alpha", "gamma", "q"],
-  aircraft6dof: ["x_n", "y_e", "z_d", "u", "v", "w", "q_w", "q_x", "q_y", "q_z", "p", "q", "r"],
-};
-
-function arrayShape(value) {
-  const shape = [];
-  let current = value;
-  while (Array.isArray(current)) {
-    shape.push(current.length);
-    current = current[0];
-  }
-  return shape;
-}
-
-function product(values) {
-  return values.reduce((total, value) => total * value, 1);
-}
-
-function parseFixedWidthStrings(bytes, dtype, count) {
-  if (dtype.includes("U")) {
-    const width = Number.parseInt(dtype.split("U").pop(), 10);
-    const out = [];
-    for (let item = 0; item < count; item += 1) {
-      let text = "";
-      for (let char = 0; char < width; char += 1) {
-        const offset = (item * width + char) * 4;
-        const codepoint = bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24);
-        if (codepoint) text += String.fromCodePoint(codepoint);
-      }
-      out.push(text);
-    }
-    return out;
-  }
-  if (dtype.includes("S")) {
-    const width = Number.parseInt(dtype.split("S").pop(), 10);
-    const decoder = new TextDecoder("latin1");
-    return Array.from({ length: count }, (_unused, item) => decoder.decode(bytes.slice(item * width, (item + 1) * width)).replace(/\0+$/, ""));
-  }
-  return null;
-}
-
-function parseSmallArray(bytes, dtype, shape) {
-  const count = product(shape.length ? shape : [1]);
-  if (count > 64) return undefined;
-  const strings = parseFixedWidthStrings(bytes, dtype, count);
-  if (strings) return shape.length === 0 ? strings[0] : strings;
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  if (dtype === "|b1" || dtype === "?") {
-    const values = Array.from({ length: count }, (_unused, index) => Boolean(view.getUint8(index)));
-    return shape.length === 0 ? values[0] : values;
-  }
-  const little = dtype.startsWith("<") || dtype.startsWith("|");
-  const kind = dtype.slice(-2);
-  const readers = {
-    i1: (offset) => view.getInt8(offset),
-    u1: (offset) => view.getUint8(offset),
-    i2: (offset) => view.getInt16(offset, little),
-    u2: (offset) => view.getUint16(offset, little),
-    i4: (offset) => view.getInt32(offset, little),
-    u4: (offset) => view.getUint32(offset, little),
-    f4: (offset) => view.getFloat32(offset, little),
-    f8: (offset) => view.getFloat64(offset, little),
-  };
-  const sizes = { i1: 1, u1: 1, i2: 2, u2: 2, i4: 4, u4: 4, f4: 4, f8: 8 };
-  const reader = readers[kind];
-  if (!reader) return undefined;
-  const values = Array.from({ length: count }, (_unused, index) => reader(index * sizes[kind]));
-  return shape.length === 0 ? values[0] : values;
-}
-
-function parseNpyHeader(buffer, name) {
-  const bytes = new Uint8Array(buffer);
-  if (bytes[0] !== 0x93 || String.fromCharCode(...bytes.slice(1, 6)) !== "NUMPY") {
-    throw new Error(`${name} is not a .npy entry`);
-  }
-  const view = new DataView(buffer);
-  const major = bytes[6];
-  const headerLength = major === 1 ? view.getUint16(8, true) : view.getUint32(8, true);
-  const headerOffset = major === 1 ? 10 : 12;
-  const header = new TextDecoder("latin1").decode(bytes.slice(headerOffset, headerOffset + headerLength));
-  const dtype = header.match(/'descr':\s*'([^']+)'/)?.[1] || "";
-  const shapeText = header.match(/'shape':\s*\(([^)]*)\)/)?.[1] || "";
-  const shape = shapeText
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => Number.parseInt(item, 10));
-  const dataOffset = headerOffset + headerLength;
-  const value = parseSmallArray(bytes.slice(dataOffset), dtype, shape);
-  return { name: name.replace(/\.npy$/, ""), dtype, shape, value };
-}
-
-async function inflateRaw(bytes) {
-  if (!("DecompressionStream" in window)) {
-    throw new Error("NPZ validation needs a browser with DecompressionStream support; upload JSON instead.");
-  }
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-  return new Response(stream).arrayBuffer();
-}
-
-async function readNpzManifest(file) {
-  const buffer = await file.arrayBuffer();
-  const bytes = new Uint8Array(buffer);
-  const view = new DataView(buffer);
-  let eocd = -1;
-  for (let index = bytes.length - 22; index >= Math.max(0, bytes.length - 65557); index -= 1) {
-    if (view.getUint32(index, true) === 0x06054b50) {
-      eocd = index;
-      break;
-    }
-  }
-  if (eocd < 0) throw new Error("NPZ zip footer not found");
-  const entries = view.getUint16(eocd + 10, true);
-  let cursor = view.getUint32(eocd + 16, true);
-  const manifest = {};
-  for (let entry = 0; entry < entries; entry += 1) {
-    if (view.getUint32(cursor, true) !== 0x02014b50) throw new Error("NPZ central directory is invalid");
-    const method = view.getUint16(cursor + 10, true);
-    const compressedSize = view.getUint32(cursor + 20, true);
-    const fileNameLength = view.getUint16(cursor + 28, true);
-    const extraLength = view.getUint16(cursor + 30, true);
-    const commentLength = view.getUint16(cursor + 32, true);
-    const localOffset = view.getUint32(cursor + 42, true);
-    const filename = new TextDecoder().decode(bytes.slice(cursor + 46, cursor + 46 + fileNameLength));
-    cursor += 46 + fileNameLength + extraLength + commentLength;
-    if (!filename.endsWith(".npy")) continue;
-    if (view.getUint32(localOffset, true) !== 0x04034b50) throw new Error(`bad local header for ${filename}`);
-    const localNameLength = view.getUint16(localOffset + 26, true);
-    const localExtraLength = view.getUint16(localOffset + 28, true);
-    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
-    const compressed = bytes.slice(dataStart, dataStart + compressedSize);
-    let arrayBuffer;
-    if (method === 0) {
-      arrayBuffer = compressed.buffer.slice(compressed.byteOffset, compressed.byteOffset + compressed.byteLength);
-    } else if (method === 8) {
-      arrayBuffer = await inflateRaw(compressed);
-    } else {
-      throw new Error(`unsupported NPZ compression method ${method} for ${filename}`);
-    }
-    const parsed = parseNpyHeader(arrayBuffer, filename);
-    manifest[parsed.name] = parsed;
-  }
-  return manifest;
-}
-
-async function readDatasetManifest(file) {
-  if (file.name.toLowerCase().endsWith(".npz")) return readNpzManifest(file);
-  const parsed = JSON.parse(await file.text());
-  const manifest = {};
-  for (const [key, value] of Object.entries(parsed)) {
-    manifest[key] = { name: key, dtype: Array.isArray(value) ? "json-array" : typeof value, shape: arrayShape(value), value };
-  }
-  return manifest;
-}
-
-function validateUploadedDataset(manifest, modelFamily) {
-  const errors = [];
-  const expectedPoseNames = POSE_NAMES_BY_MODEL[modelFamily];
-  const expectedDirectNames = DIRECT_STATE_NAMES_BY_MODEL[modelFamily];
-  const expectedDof = modelFamily === "aircraft6dof" ? 6 : 3;
-  for (const key of REQUIRED_SPLIT_KEYS) {
-    if (!manifest[key]) errors.push(`missing ${key}`);
-  }
-  const timeShape = manifest.time_s?.shape || [];
-  const validShape = manifest.valid_mask?.shape || [];
-  const controlShape = manifest.control_meas?.shape || [];
-  const poseShape = manifest.pose_meas?.shape || [];
-  if (timeShape.length !== 2) errors.push("time_s must be [segment, sample]");
-  if (validShape.join(",") !== timeShape.join(",")) errors.push("valid_mask shape must match time_s");
-  if (controlShape.length !== 3 || controlShape[0] !== timeShape[0] || controlShape[1] !== timeShape[1] || controlShape[2] !== 4) {
-    errors.push("control_meas must be [segment, sample, 4]");
-  }
-  if (poseShape.length !== 3 || poseShape[0] !== timeShape[0] || poseShape[1] !== timeShape[1] || poseShape[2] !== expectedPoseNames.length) {
-    errors.push(`pose_meas must be [segment, sample, ${expectedPoseNames.length}] for ${modelFamily}`);
-  }
-  if (manifest.direct_state_meas) {
-    const shape = manifest.direct_state_meas.shape || [];
-    if (!manifest.direct_state_names) errors.push("direct_state_meas requires direct_state_names");
-    if (shape.length !== 3 || shape[0] !== timeShape[0] || shape[1] !== timeShape[1] || shape[2] !== expectedDirectNames.length) {
-      errors.push(`direct_state_meas must be [segment, sample, ${expectedDirectNames.length}] for ${modelFamily}`);
-    }
-  }
-  if (manifest.format_version?.shape?.length > 1) errors.push(`format_version must be scalar ${FORMAT_VERSION}`);
-  if (manifest.format_version?.value && manifest.format_version.value !== FORMAT_VERSION) {
-    errors.push(`format_version must be ${FORMAT_VERSION}`);
-  }
-  if (manifest.split_name?.value && !["train", "validation"].includes(manifest.split_name.value)) {
-    errors.push("split_name must be train or validation");
-  }
-  if (manifest.system_dof?.value && Number(manifest.system_dof.value) !== expectedDof) {
-    errors.push(`system_dof must be ${expectedDof}`);
-  }
-  if (manifest.pose_names?.value && manifest.pose_names.value.join(",") !== expectedPoseNames.join(",")) {
-    errors.push(`pose_names must be ${expectedPoseNames.join(", ")}`);
-  }
-  if (manifest.control_names?.value && manifest.control_names.value.join(",") !== ["thrust", "aileron", "elevator", "rudder"].join(",")) {
-    errors.push("control_names must be thrust, aileron, elevator, rudder");
-  }
-  if (manifest.direct_state_names?.value && manifest.direct_state_names.value.join(",") !== expectedDirectNames.join(",")) {
-    errors.push(`direct_state_names must be ${expectedDirectNames.join(", ")}`);
-  }
-  return errors;
-}
-
-async function analyzeUpload() {
-  const input = document.querySelector("#upload-file");
-  const status = document.querySelector("#upload-status");
-  const modelFamily = document.querySelector("#upload-data-family").value;
-  const file = input.files?.[0];
-  setActionProgress(0, "");
-  if (!file) {
-    status.textContent = "No file selected.";
-    return;
-  }
-  try {
-    setActionProgress(25, "Reading compact dataset...");
-    const manifest = await readDatasetManifest(file);
-    setActionProgress(70, "Validating canonical schema...");
-    const errors = validateUploadedDataset(manifest, modelFamily);
-    if (errors.length) {
-      state.lastValidatedDataset = null;
-      setActionProgress(0, "");
-      status.textContent = `Invalid ${modelFamily} dataset: ${errors.slice(0, 4).join("; ")}`;
-      return;
-    }
-    const scenario = `upload_${slug(file.name)}`;
-    const title = file.name.replace(/\.[^.]+$/, "");
-    state.uploadScenarios = state.uploadScenarios.filter((item) => item.id !== scenario).concat({
-      id: scenario,
-      title,
-      model_family: modelFamily,
-      method_result_count: 0,
-    });
-    state.uploadDatasets = state.uploadDatasets.filter((item) => item.id !== scenario).concat({
-      id: scenario,
-      title,
-      status: "uploaded_validated",
-      model_family: modelFamily,
-      source_type: "browser_upload",
-      local_data_dir: file.name,
-    });
-    state.lastValidatedDataset = { id: scenario, title, fileName: file.name, modelFamily };
-    state.modelFamily = modelFamily;
-    state.scenario = scenario;
-    setActionProgress(100, `Valid ${modelFamily} compact dataset: ${file.name}`);
-    render();
-  } catch (error) {
-    state.lastValidatedDataset = null;
-    setActionProgress(0, "");
-    status.textContent = error.message;
-  }
-}
-
-async function copyCommand(text) {
-  if (!navigator.clipboard) return false;
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function renderMethodCommand() {
-  const output = document.querySelector("#command-output");
-  const method = selectedMethodMetadata();
-  const dataset = state.lastValidatedDataset || { id: state.scenario, fileName: "<dataset-id-or-flat-npz>", modelFamily: state.modelFamily };
-  setActionProgress(15, "Preparing reproducible command...");
-  if (!method) {
-    setActionProgress(0, "");
-    output.textContent = "Select a method first.";
-    return;
-  }
-  const datasetArg = dataset.id.startsWith("upload_") ? `<validated-flat-npz-for-${dataset.fileName}>` : dataset.id;
-  const warnings = [];
-  if (method.requires_gpu) {
-    warnings.push("This method is GPU-oriented; expect a slow run or dependency failures on CPU-only machines.");
-  }
-  if (method.heavy) {
-    warnings.push("This method is marked as a heavier benchmark path; use the committed website snapshot unless you need fresh results.");
-  }
-  let command;
-  if (dataset.modelFamily === "aircraft6dof" || state.modelFamily === "aircraft6dof") {
-    command = `python3 -m models.aircraft6dof.comparison_suite --dataset ${datasetArg} --state-source ${state.source}`;
-  } else if (dataset.id.startsWith("upload_")) {
-    command = `python3 comparison_suite.py --dataset ${datasetArg} --include-methods "${method.name}" --state-source ${state.source}`;
-  } else {
-    command = `./results.py suite --dataset-modes ${datasetArg} --include-methods "${method.name}" --state-source ${state.source}`;
-  }
-  setActionProgress(75, "Command prepared; browser execution is not available on the static site.");
-  const copied = await copyCommand(command);
-  output.textContent = [
-    "The website shows the committed benchmark snapshot by default.",
-    "Static GitHub Pages cannot execute Python benchmark methods directly.",
-    ...warnings,
-    copied ? "Command copied to clipboard:" : "Run this command locally or in CI:",
-    command,
-  ].join("\n");
-  setActionProgress(100, copied ? "Prepared and copied command." : "Prepared command.");
-}
-
-async function renderSimCommand() {
-  const output = document.querySelector("#command-output");
-  setActionProgress(40, "Preparing simulation command...");
-  let command;
-  if (state.modelFamily === "aircraft6dof") {
-    command = "./results.py simulate-6dof --dataset-mode aggressive --train-trials 32 --validation-trials 8";
-  } else {
-    command = "./results.py compact-3dof --dataset-mode open_loop --train-trials 64 --validation-trials 16";
-  }
-  const copied = await copyCommand(command);
-  output.textContent = [
-    "Simulation datasets are generated on demand; committed results are the default snapshot.",
-    copied ? "Command copied to clipboard:" : "Run this command locally or in CI:",
-    command,
-  ].join("\n");
-  setActionProgress(100, copied ? "Prepared and copied simulation command." : "Prepared simulation command.");
 }
 
 function render() {
@@ -1492,8 +1343,6 @@ function render() {
   renderPlaybackTabs();
   renderModelTabs();
   renderScenarioSelect();
-  document.querySelector("#upload-data-family").value = state.modelFamily;
-  renderMethodSelect();
   for (const node of document.querySelectorAll("#source-filter button")) {
     node.classList.toggle("active", node.dataset.source === state.source);
   }
@@ -1513,7 +1362,9 @@ async function init() {
   state.maneuvers = await loadJson("maneuver_summary.json");
   state.playback = await loadJson("playback.json");
   state.methodTraces = await loadJson("method_traces.json");
-  state.modelFamily = state.manifest.model_families[0] || "aircraft3dof";
+  if (!state.manifest.model_families.includes(state.modelFamily)) {
+    state.modelFamily = state.manifest.model_families[0] || "aircraft3dof";
+  }
   setDefaultScenario();
   bindControls();
   renderMeta();

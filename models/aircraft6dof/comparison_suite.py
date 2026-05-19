@@ -82,6 +82,7 @@ class Split6DOF:
     u_cmd: np.ndarray
     u_act: np.ndarray
     x0: np.ndarray
+    mocap_frame: str = "ned"
 
     @property
     def dt(self) -> float:
@@ -132,8 +133,10 @@ def load_split(path: Path) -> Split6DOF:
             y_meas = np.asarray(data["direct_state_meas"], dtype=float)[:, :n, :]
         if "mocap_meas" in data.files:
             mocap_meas = np.asarray(data["mocap_meas"], dtype=float)[:, :n, :]
+            mocap_frame = "ned"
         else:
             mocap_meas = np.asarray(data["pose_meas"], dtype=float)[:, :n, :]
+            mocap_frame = "enu"
         if "mocap_true" in data.files:
             mocap_ref = np.asarray(data["mocap_true"], dtype=float)[:, :n, :]
         else:
@@ -151,6 +154,7 @@ def load_split(path: Path) -> Split6DOF:
         mocap_ref = np.asarray(data["mocap_true"], dtype=float)
         u_cmd = np.asarray(data["u_cmd"], dtype=float)
         u_act = np.asarray(data["u_act"], dtype=float)
+        mocap_frame = "ned"
     return Split6DOF(
         t=t,
         x_true=x_ref,
@@ -160,6 +164,7 @@ def load_split(path: Path) -> Split6DOF:
         u_cmd=u_cmd,
         u_act=u_act,
         x0=x_ref[:, 0, :],
+        mocap_frame=mocap_frame,
     )
 
 
@@ -634,6 +639,23 @@ def mocap_output_rollout(initial: np.ndarray, u: np.ndarray, t: np.ndarray, weig
         pred[trial, 0, 3:7] = normalize_quaternion(pred[trial, 0, 3:7])
         for index in range(len(t) - 1):
             phi = np.concatenate((pred[trial, index], u[trial, index], [1.0]))
+            pred[trial, index + 1] = phi @ weights
+            pred[trial, index + 1, 3:7] = normalize_quaternion(pred[trial, index + 1, 3:7])
+    return pred
+
+
+def mocap_output_lagged_rollout(initial_history: np.ndarray, u: np.ndarray, t: np.ndarray, weights: np.ndarray, lag: int = 3) -> np.ndarray:
+    pred = np.zeros((u.shape[0], len(t), 7))
+    seed_count = min(lag, initial_history.shape[1], len(t))
+    pred[:, :seed_count, :] = initial_history[:, :seed_count, :]
+    if seed_count < lag:
+        pred[:, seed_count:lag, :] = pred[:, seed_count - 1 : seed_count, :]
+    for trial in range(u.shape[0]):
+        for index in range(lag):
+            pred[trial, index, 3:7] = normalize_quaternion(pred[trial, index, 3:7])
+        for index in range(lag - 1, len(t) - 1):
+            history = pred[trial, index - lag + 1 : index + 1].reshape(-1)
+            phi = np.concatenate((history, u[trial, index], [1.0]))
             pred[trial, index + 1] = phi @ weights
             pred[trial, index + 1, 3:7] = normalize_quaternion(pred[trial, index + 1, 3:7])
     return pred
@@ -1246,27 +1268,37 @@ def run_methods(
         _scenario, train, _train_x, _train_samples = training_context("6DOF-OEM-MocapOutput")
         start = time.perf_counter()
         cpu_start = time.process_time()
-        weights_y = ridge_fit(design_matrix(train.mocap_meas[:, :-1, :], train.u_cmd[:, :-1, :]), train.mocap_meas[:, 1:, :], ridge)
+        lag = 3
+        history = []
+        targets = []
+        for trial in range(train.mocap_meas.shape[0]):
+            for index in range(lag - 1, train.mocap_meas.shape[1] - 1):
+                history.append(np.concatenate((train.mocap_meas[trial, index - lag + 1 : index + 1].reshape(-1), train.u_cmd[trial, index], [1.0])))
+                targets.append(train.mocap_meas[trial, index + 1])
+        weights_y = ridge_fit(np.asarray(history)[:, None, :], np.asarray(targets)[:, None, :], ridge)
         train_elapsed = time.perf_counter() - start
         train_cpu = time.process_time() - cpu_start
         rollout_start = time.perf_counter()
-        y_pred = parallel_rollout("mocap_output_rollout", workers, validation.mocap_meas[:, 0, :], validation.u_cmd, validation.t, weights_y)
+        y_pred = parallel_rollout("mocap_output_lagged_rollout", workers, validation.mocap_meas[:, :lag, :], validation.u_cmd, validation.t, weights_y, lag=lag)
         rollout_elapsed = time.perf_counter() - rollout_start
         score, metrics = mocap_score(y_pred, validation.mocap_true)
         add_result(
             Result6DOF(
                 method="6DOF-OEM-MocapOutput",
-                description="Affine open-loop predictor on mocap position/quaternion outputs.",
-                backend="numpy-ridge",
+                description="Lagged affine open-loop predictor on mocap position/quaternion outputs.",
+                backend="numpy-lagged-ridge",
                 state_source=state_source,
                 validation_score=score,
                 train_elapsed_s=train_elapsed,
                 train_cpu_s=train_cpu,
                 rollout_elapsed_s=rollout_elapsed,
                 total_elapsed_s=train_elapsed + rollout_elapsed,
-                train_samples=int(np.prod(train.mocap_meas[:, :-1, :].shape[:2])),
+                train_samples=len(targets),
                 decision_variables=int(weights_y.size),
-                notes="Scores mocap-output NRMSE because full velocity/rate states are not predicted.",
+                notes=(
+                    "Scores mocap-output NRMSE because full velocity/rate states are not predicted. "
+                    "The validation rollout is seeded with a three-sample pose history so initial translation rate is observable."
+                ),
                 y_pred=y_pred,
                 x_pred=None,
                 **metrics,
@@ -1440,20 +1472,25 @@ def state_segment_to_web(t: np.ndarray, x: np.ndarray, u_cmd: np.ndarray, name: 
     }
 
 
-def pose_segment_to_web(t: np.ndarray, pose: np.ndarray, u_cmd: np.ndarray, name: str) -> dict[str, object]:
+def pose_segment_to_web(t: np.ndarray, pose: np.ndarray, u_cmd: np.ndarray, name: str, frame: str) -> dict[str, object]:
     stride = max(1, int(np.ceil(len(t) / WEB_TRACE_MAX_POINTS)))
     t = t[::stride]
     pose = pose[::stride]
     u_cmd = u_cmd[::stride]
-    position = np.column_stack([pose[:, 1], pose[:, 0], -pose[:, 2]])
+    if frame == "enu":
+        position = pose[:, 0:3]
+        quat = pose[:, 3:7]
+    else:
+        position = np.column_stack([pose[:, 1], pose[:, 0], -pose[:, 2]])
+        quat = np.asarray([quat_wxyz_from_rotation(NED_TO_ENU @ rotation_body_to_inertial(q)) for q in pose[:, 3:7]])
     position = position - position[0]
-    quat = np.asarray([quat_wxyz_from_rotation(NED_TO_ENU @ rotation_body_to_inertial(q)) for q in pose[:, 3:7]])
     return {
         "name": name,
         "time_s": np.round(t - t[0], 4).tolist(),
         "position_enu_m": np.round(position, 5).tolist(),
         "quaternion_wxyz": np.round(quat, 7).tolist(),
         "control_meas": np.round(u_cmd[:, [0, 2, 1, 3]], 5).tolist(),
+        "pose_frame": "enu",
     }
 
 
@@ -1483,7 +1520,7 @@ def write_method_traces(results: list[Result6DOF], validation: Split6DOF, scenar
         else:
             segment_count = min(result.y_pred.shape[0], validation.u_cmd.shape[0], segment_limit)
             segments = [
-                pose_segment_to_web(validation.t, result.y_pred[index], validation.u_cmd[index], f"validation_trial_{index + 1}")
+                pose_segment_to_web(validation.t, result.y_pred[index], validation.u_cmd[index], f"validation_trial_{index + 1}", validation.mocap_frame)
                 for index in range(segment_count)
             ]
         traces.append(

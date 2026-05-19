@@ -35,11 +35,6 @@ def main() -> int:
         "model-tabs",
         "leaderboard-body",
         "dataset-body",
-        "upload-file",
-        "upload-data-family",
-        "upload-method",
-        "method-command",
-        "simulate-command",
         "aircraft-playback",
         "playback-status",
         "playback-segment",
@@ -61,7 +56,6 @@ def main() -> int:
     require(isinstance(method_traces, list), "method traces bundle must be a list")
     require("three" in app.lower() and "renderPlayback" in app, "Three.js playback code is missing")
     require("renderTimeseries" in app and "selectedTraceSegments" in app, "time-history trace code is missing")
-    require("validateUploadedDataset" in app and "readNpzManifest" in app, "browser dataset validation code is missing")
     print(f"site ok: {len(scenarios)} scenarios, {len(datasets)} datasets, {len(method_results)} result rows")
     return 0
 

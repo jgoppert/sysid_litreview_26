@@ -121,10 +121,6 @@
         <div class="panel">
           <div class="panel-heading">
             <h2>Method Comparisons</h2>
-            <div class="panel-actions" aria-label="Method selection controls">
-              <button type="button" id="methods-select-all">Select All</button>
-              <button type="button" id="methods-clear">Deselect All</button>
-            </div>
           </div>
           <div class="table-wrap">
             <table>
@@ -132,6 +128,7 @@
                 <tr>
                   <th>Method</th>
                   <th>Score</th>
+                  <th>Pose RMSE m</th>
                   <th>Train s</th>
                   <th>Model eval s</th>
                   <th>Training data</th>
@@ -150,36 +147,6 @@
             <dl class="maneuver-list" id="maneuver-list"></dl>
           </div>
 
-          <div class="panel">
-            <div class="panel-heading">
-              <h2>Dataset Actions</h2>
-            </div>
-            <div class="upload-form">
-              <label>
-                Data family
-                <select id="upload-data-family">
-                  <option value="aircraft3dof">3DOF compact</option>
-                  <option value="aircraft6dof">6DOF compact</option>
-                </select>
-              </label>
-              <label>
-                Compact dataset
-                <input id="upload-file" type="file" accept=".npz,.json,application/json">
-              </label>
-              <button type="button" id="upload-run">Validate Upload</button>
-              <label>
-                Existing method to run
-                <select id="upload-method"></select>
-              </label>
-              <button type="button" id="method-command">Prepare Run</button>
-              <button type="button" id="simulate-command">Sim Dataset Command</button>
-              <div class="action-progress" aria-label="Action progress">
-                <span id="action-progress-bar"></span>
-              </div>
-              <p id="upload-status" class="upload-status"></p>
-              <pre id="command-output" class="command-output"></pre>
-            </div>
-          </div>
         </div>
       </section>
 
@@ -217,7 +184,7 @@
           </div>
           <div>
             <dt>Validation score</dt>
-            <dd>Held-out trajectory error; lower is better.</dd>
+            <dd>Normalized held-out trajectory error over the available state or pose channels; lower is better, but absolute pose RMSE should be checked for long trajectories.</dd>
           </div>
         </dl>
       </section>

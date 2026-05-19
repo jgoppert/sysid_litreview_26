@@ -62,5 +62,45 @@
     "min_speed_mps": 8.456336250621884,
     "mode": "Aggressive SAFE recovery-probe maneuver",
     "vertical_extent_m": 23.529281702609772
+  },
+  {
+    "max_abs_alpha_deg": null,
+    "max_abs_theta_deg": 87.93254741085288,
+    "max_speed_mps": 39.26626599868134,
+    "min_speed_mps": 13.074066729890857,
+    "mode": "6-DOF open-loop maneuver",
+    "vertical_extent_m": 266.04853
+  },
+  {
+    "max_abs_alpha_deg": null,
+    "max_abs_theta_deg": 83.2013593713718,
+    "max_speed_mps": 25.72856979186237,
+    "min_speed_mps": 3.960784740479644,
+    "mode": "6-DOF sine-sweep maneuver",
+    "vertical_extent_m": 107.07687
+  },
+  {
+    "max_abs_alpha_deg": null,
+    "max_abs_theta_deg": 89.35795994989714,
+    "max_speed_mps": 29.491256085667334,
+    "min_speed_mps": 3.8547928457545564,
+    "mode": "6-DOF aggressive nonlinear stall maneuver",
+    "vertical_extent_m": 162.86352000000002
+  },
+  {
+    "max_abs_alpha_deg": null,
+    "max_abs_theta_deg": 88.39165199957927,
+    "max_speed_mps": 36.577874935806044,
+    "min_speed_mps": 3.9424558023486274,
+    "mode": "6-DOF local trim-grid small-deviation maneuver",
+    "vertical_extent_m": 135.75637
+  },
+  {
+    "max_abs_alpha_deg": null,
+    "max_abs_theta_deg": 19.722434871213252,
+    "max_speed_mps": 5.467087191650694,
+    "min_speed_mps": 2.8115149830651402,
+    "mode": "Sport Cub S 2 motion-capture 6DOF dataset, 2026-04-17",
+    "vertical_extent_m": 2.01982
   }
 ]

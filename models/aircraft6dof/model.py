@@ -39,8 +39,8 @@ COEFFICIENT_NAMES = (
     "beta",
     "stall_gate",
 )
-MIN_SPEED = 4.0
-MAX_SPEED = 48.0
+MIN_SPEED = 2.5
+MAX_SPEED = 12.0
 
 
 @dataclass(frozen=True)
@@ -54,17 +54,17 @@ class Aircraft6DOFConfig:
     measurement_noise: tuple[float, ...] = (0.03, 0.03, 0.03, 0.015, 0.015, 0.015, 0.015, 0.01, 0.01, 0.01, 0.02, 0.02, 0.02)
     mocap_position_noise: float = 0.003
     mocap_attitude_noise: float = 0.002
-    mass: float = 1.15
+    mass: float = 0.075
     gravity: float = 9.81
-    inertia: tuple[float, float, float] = (0.052, 0.071, 0.112)
-    inertia_xz: float = 0.002
+    inertia: tuple[float, float, float] = (0.0016, 0.0022, 0.0036)
+    inertia_xz: float = 0.00005
     rho: float = 1.18
-    wing_area: float = 0.275
-    wing_span: float = 1.05
-    mean_chord: float = 0.265
+    wing_area: float = 0.066
+    wing_span: float = 0.62
+    mean_chord: float = 0.11
     prop_arm: float = 0.035
-    wing_speed: float = 15.5
-    max_thrust: float = 8.8
+    wing_speed: float = 4.5
+    max_thrust: float = 0.32
     prop_wash_gain: float = 0.22
     alpha_stall_deg: float = 14.0
     stall_width_deg: float = 2.2
