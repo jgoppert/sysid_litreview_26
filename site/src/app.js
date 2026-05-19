@@ -239,6 +239,14 @@ function bindControls() {
     state.playbackFollow = !state.playbackFollow;
     renderPlaybackControls(selectedPlayback());
   });
+  document.querySelector("#methods-select-all").addEventListener("click", () => {
+    for (const row of selectedRows()) state.selectedMethods.add(methodKey(row.method));
+    render();
+  });
+  document.querySelector("#methods-clear").addEventListener("click", () => {
+    state.selectedMethods.clear();
+    render();
+  });
   document.querySelector("#playback-speed").addEventListener("change", (event) => {
     state.playbackSpeed = Number.parseFloat(event.target.value) || 1;
   });

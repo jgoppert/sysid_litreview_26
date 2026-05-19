@@ -215,7 +215,21 @@ button:hover {
   display: flex;
   justify-content: space-between;
   gap: 16px;
+  align-items: start;
   margin-bottom: 14px;
+}
+
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.panel-actions button {
+  min-width: 96px;
+  padding: 7px 10px;
+  font-size: 12px;
 }
 
 .plot {
@@ -503,6 +517,36 @@ button:hover {
   line-height: 1.4;
 }
 
+.definition-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.definition-list div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.22fr) minmax(0, 1fr);
+  gap: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.definition-list div:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.definition-list dt {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.definition-list dd {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -638,6 +682,16 @@ tbody tr {
 
   .playback-controls {
     grid-template-columns: repeat(3, 42px) 78px minmax(0, 1fr);
+  }
+
+  .panel-heading,
+  .definition-list div {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .panel-actions {
+    justify-content: flex-start;
   }
 
   .speed-label {
