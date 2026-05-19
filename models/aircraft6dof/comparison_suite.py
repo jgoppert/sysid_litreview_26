@@ -242,6 +242,19 @@ def smooth_array(y: np.ndarray, window: int = 9) -> np.ndarray:
     return out
 
 
+def endpoint_derivative(values: np.ndarray, t: np.ndarray, *, start: bool, samples: int = 7) -> np.ndarray:
+    count = min(samples, values.shape[1], len(t))
+    if count < 2:
+        return np.zeros((values.shape[0], values.shape[2]), dtype=float)
+    indices = slice(0, count) if start else slice(values.shape[1] - count, values.shape[1])
+    time = np.asarray(t[indices], dtype=float)
+    centered = time - np.mean(time)
+    denom = float(centered @ centered)
+    if denom < 1e-12:
+        return np.zeros((values.shape[0], values.shape[2]), dtype=float)
+    return np.einsum("n,tnd->td", centered, values[:, indices, :]) / denom
+
+
 def derive_state_from_mocap(mocap: np.ndarray, t: np.ndarray) -> np.ndarray:
     dt = float(np.median(np.diff(t)))
     pos = smooth_array(mocap[..., 0:3], window=11)
@@ -249,6 +262,15 @@ def derive_state_from_mocap(mocap: np.ndarray, t: np.ndarray) -> np.ndarray:
     quat /= np.maximum(np.linalg.norm(quat, axis=-1, keepdims=True), 1e-12)
     pos_dot = np.gradient(pos, dt, axis=1, edge_order=2)
     quat_dot = np.gradient(quat, dt, axis=1, edge_order=2)
+    pos[:, 0, :] = mocap[:, 0, 0:3]
+    pos[:, -1, :] = mocap[:, -1, 0:3]
+    quat[:, 0, :] = mocap[:, 0, 3:7]
+    quat[:, -1, :] = mocap[:, -1, 3:7]
+    quat /= np.maximum(np.linalg.norm(quat, axis=-1, keepdims=True), 1e-12)
+    pos_dot[:, 0, :] = endpoint_derivative(mocap[..., 0:3], t, start=True)
+    pos_dot[:, -1, :] = endpoint_derivative(mocap[..., 0:3], t, start=False)
+    quat_dot[:, 0, :] = endpoint_derivative(mocap[..., 3:7], t, start=True)
+    quat_dot[:, -1, :] = endpoint_derivative(mocap[..., 3:7], t, start=False)
     x = np.zeros((*mocap.shape[:2], len(STATE_NAMES)))
     x[..., 0:3] = pos
     x[..., 6:10] = quat

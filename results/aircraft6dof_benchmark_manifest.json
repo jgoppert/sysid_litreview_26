@@ -4,7 +4,7 @@
     "work/data/aircraft_6dof_sine_sweep",
     "work/data/aircraft_6dof_aggressive",
     "work/data/aircraft_6dof_trim_grid",
-    "data/sportcub_mocap_4_17_26_train.npz"
+    "data/sportcub_mocap_4_17_26_validation.npz"
   ],
   "methods": [
     "6DOF-EKF-ParamID",
