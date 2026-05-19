@@ -16,6 +16,7 @@ const state = {
   playbackScrubbing: false,
   playbackSegmentIndex: 0,
   playbackView: "animation",
+  playbackFollow: false,
   selectedMethods: new Set(),
   modelFamily: "aircraft3dof",
   scenario: "",
@@ -233,6 +234,10 @@ function bindControls() {
   });
   document.querySelector("#playback-forward").addEventListener("click", () => {
     seekPlayback(state.playbackTimeS + 2.0);
+  });
+  document.querySelector("#playback-follow").addEventListener("click", () => {
+    state.playbackFollow = !state.playbackFollow;
+    renderPlaybackControls(selectedPlayback());
   });
   document.querySelector("#playback-speed").addEventListener("change", (event) => {
     state.playbackSpeed = Number.parseFloat(event.target.value) || 1;
@@ -547,9 +552,9 @@ function makeAircraftMesh() {
 
   const fuselage = new THREE.Mesh(new THREE.BoxGeometry(1.35, 0.18, 0.16), bodyMaterial);
   group.add(fuselage);
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.32, 24), accentMaterial);
-  nose.rotation.z = -Math.PI / 2;
-  nose.position.x = 0.84;
+  const nose = new THREE.Mesh(new THREE.CylinderGeometry(0.105, 0.12, 0.28, 24), accentMaterial);
+  nose.rotation.z = Math.PI / 2;
+  nose.position.x = 0.82;
   group.add(nose);
   const wingCenter = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.035, 1.1), wingMaterial);
   wingCenter.position.x = 0.02;
@@ -561,24 +566,36 @@ function makeAircraftMesh() {
   rightWing.position.set(0.02, 0, 0.92);
   group.add(rightWing);
 
-  const leftAileron = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.7), controlMaterial);
-  leftAileron.position.set(-0.26, -0.012, -0.95);
+  const leftAileron = new THREE.Group();
+  leftAileron.position.set(-0.14, -0.012, -0.95);
+  const leftAileronPanel = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.055, 0.78), controlMaterial);
+  leftAileronPanel.position.x = -0.16;
+  leftAileron.add(leftAileronPanel);
   group.add(leftAileron);
-  const rightAileron = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.7), controlMaterial);
-  rightAileron.position.set(-0.26, -0.012, 0.95);
+  const rightAileron = new THREE.Group();
+  rightAileron.position.set(-0.14, -0.012, 0.95);
+  const rightAileronPanel = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.055, 0.78), controlMaterial);
+  rightAileronPanel.position.x = -0.16;
+  rightAileron.add(rightAileronPanel);
   group.add(rightAileron);
 
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.03, 0.9), wingMaterial);
-  tail.position.x = -0.68;
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.03, 0.96), wingMaterial);
+  tail.position.x = -0.58;
   group.add(tail);
-  const elevator = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.05, 0.9), controlMaterial);
-  elevator.position.set(-0.94, -0.01, 0);
+  const elevator = new THREE.Group();
+  elevator.position.set(-0.82, -0.01, 0);
+  const elevatorPanel = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.055, 0.98), controlMaterial);
+  elevatorPanel.position.x = -0.15;
+  elevator.add(elevatorPanel);
   group.add(elevator);
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.46, 0.045), wingMaterial);
-  fin.position.set(-0.66, 0.27, 0);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.54, 0.05), wingMaterial);
+  fin.position.set(-0.62, 0.31, 0);
   group.add(fin);
-  const rudder = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.62, 0.065), controlMaterial);
-  rudder.position.set(-0.86, 0.32, 0);
+  const rudder = new THREE.Group();
+  rudder.position.set(-0.84, 0.33, 0);
+  const rudderPanel = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.68, 0.07), controlMaterial);
+  rudderPanel.position.x = -0.14;
+  rudder.add(rudderPanel);
   group.add(rudder);
 
   const prop = new THREE.Group();
@@ -599,8 +616,8 @@ function updateAircraftControls(aircraft, controls, deltaS) {
   const aileron = clamp(controls[1] ?? 0, -1, 1);
   const elevator = clamp(controls[2] ?? 0, -1, 1);
   const rudder = clamp(controls[3] ?? 0, -1, 1);
-  if (parts.leftAileron) parts.leftAileron.rotation.z = 0.95 * aileron;
-  if (parts.rightAileron) parts.rightAileron.rotation.z = -0.95 * aileron;
+  if (parts.leftAileron) parts.leftAileron.rotation.z = -0.95 * aileron;
+  if (parts.rightAileron) parts.rightAileron.rotation.z = 0.95 * aileron;
   if (parts.elevator) parts.elevator.rotation.z = -1.0 * elevator;
   if (parts.rudder) parts.rudder.rotation.y = 0.95 * rudder;
   if (parts.prop) parts.prop.rotation.x += deltaS * (22 + 90 * thrust);
@@ -866,11 +883,16 @@ function updatePlaybackScrub(track) {
 
 function renderPlaybackControls(track) {
   const toggle = document.querySelector("#playback-toggle");
+  const follow = document.querySelector("#playback-follow");
   const speed = document.querySelector("#playback-speed");
   const segmentSelect = document.querySelector("#playback-segment");
   if (toggle) {
     toggle.textContent = state.playbackPlaying ? "||" : ">";
     toggle.setAttribute("aria-label", state.playbackPlaying ? "Pause" : "Play");
+  }
+  if (follow) {
+    follow.classList.toggle("active", state.playbackFollow);
+    follow.setAttribute("aria-pressed", String(state.playbackFollow));
   }
   if (speed) speed.value = String(state.playbackSpeed);
   if (segmentSelect && track) {
@@ -904,6 +926,10 @@ function tickPlayback(nowMs) {
       playback.aircraft.quaternion.copy(sample.quaternion);
       updateAircraftControls(playback.aircraft, sample.controls, deltaS);
       updateControlHud(sample.controls);
+      if (state.playbackFollow) {
+        playback.controls.target.copy(sample.position);
+        updatePlaybackCamera(playback);
+      }
     }
     updatePlaybackScrub(segment);
     playback.renderer.render(playback.scene, playback.camera);
